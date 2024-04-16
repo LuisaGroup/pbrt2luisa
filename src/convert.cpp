@@ -7,6 +7,7 @@
 
 #include <nlohmann/json.hpp>
 #include <magic_enum/magic_enum.hpp>
+#include <glm/glm.hpp>
 #include <minipbrt.h>
 
 #include "logging.h"
@@ -44,6 +45,52 @@ namespace luisa::render {
     return {
         {"impl", "Matrix"},
         {"prop", {{"m", m}}}};
+}
+
+[[nodiscard]] static nlohmann::json convert_camera_transform(
+    const minipbrt::Scene *scene,
+    const minipbrt::Transform &transform) noexcept {
+    /*
+    def transform(v):
+        v = np.reshape(np.array(v + [1.0]), [4, 1])
+        v = np.reshape(np.matmul(matrix, v), [4])
+        return v[:3] / v[3]
+
+    def transform_normal(n):
+        n = np.reshape(np.array(n), [3, 1])
+        n = np.reshape(np.matmul(np.transpose(np.linalg.inv(matrix[:3, :3])), n), [3])
+        n = np.array([e if abs(e) > 1e-5 else 0.0 for e in n])
+        return n / np.linalg.norm(n)
+
+    eye = transform([0.0, 0.0, 0.0])
+    up = transform_normal([0.0, 1.0, 0.0])
+    lookat = eye + transform_normal([0.0, 0.0, 1.0])
+    scene["Camera"].append([["time", [0.0]], ["position", eye], ["up", up], ["lookAt", lookat]])
+    return scene, loc
+     */
+    // TODO: consider animated transform
+    glm::mat4 m;
+    for (auto i = 0; i < 4; i++) {
+        for (auto j = 0; j < 4; j++) {
+            m[i][j] = transform.start[j][i];
+        }
+    }
+    auto transform_point = [&](glm::vec3 p) noexcept {
+        return glm::vec3(m * glm::vec4(p, 1.f));
+    };
+    auto transform_normal = [&](glm::vec3 n) noexcept {
+        auto mm = glm::mat3(m);
+        return glm::normalize(glm::transpose(glm::inverse(mm)) * n);
+    };
+    auto eye = transform_point(glm::vec3(0.f));
+    auto up = transform_normal(glm::vec3(0.f, 1.f, 0.f));
+    auto front = transform_normal(glm::vec3(0.f, 0.f, 1.f));
+    return {
+        {"impl", "View"},
+        {"prop",
+         {{"origin", {eye.x, eye.y, eye.z}},
+          {"front", {front.x, front.y, front.z}},
+          {"up", {up.x, up.y, up.z}}}}};
 }
 
 static void dump_mesh_to_wavefront_obj(
@@ -117,6 +164,12 @@ static void dump_mesh_to_wavefront_obj(
     return std::format("Surface:{}:{}", index, name ? name : "unnamed");
 }
 
+[[nodiscard]] static std::string texture_name(const minipbrt::Scene *scene, uint32_t index) noexcept {
+    expect(index != minipbrt::kInvalidIndex, "Invalid texture index.");
+    auto name = scene->textures[index]->name;
+    return std::format("Texture:{}:{}", index, name ? name : "unnamed");
+}
+
 static void convert_shapes(
     const std::filesystem::path &base_dir,
     const minipbrt::Scene *scene,
@@ -168,8 +221,16 @@ static void convert_shapes(
                 dump_mesh_to_wavefront_obj(mesh_dir / std::format("{:05}.obj", shape_index), mesh);
                 shape["impl"] = "Mesh";
                 prop["file"] = std::format("lr_exported_meshes/{:05}.obj", shape_index);
-                if (mesh->alpha != minipbrt::kInvalidIndex) { eprintln("Ignored unsupported shape alpha at index {}.", shape_index); }
-                if (mesh->shadowalpha != minipbrt::kInvalidIndex) { eprintln("Ignored unsupported shape shadow alpha at index {}.", shape_index); }
+                if (mesh->alpha != minipbrt::kInvalidIndex) {// override the material's alpha
+                    if (auto m = mesh->material; m == minipbrt::kInvalidIndex) {
+                        prop["surface"] = {
+                            {"impl", "Matte"},
+                            {"prop", nlohmann::json::object()}};
+                    } else {
+                        prop["surface"] = converted[material_name(scene, m)];
+                    }
+                    prop["surface"]["prop"]["alpha"] = std::format("@{}", texture_name(scene, mesh->alpha));
+                }
                 break;
             }
             default: eprintln("Ignored unsupported shape at index {} with type '{}'.",
@@ -257,10 +318,124 @@ static void convert_area_lights(const minipbrt::Scene *scene,
 static void convert_textures(const std::filesystem::path &base_dir,
                              const minipbrt::Scene *scene,
                              nlohmann::json &converted) noexcept {
+    for (auto texture_index = 0u; texture_index < scene->textures.size(); texture_index++) {
+        auto base_texture = scene->textures[texture_index];
+        nlohmann::json texture;
+        texture["type"] = "Texture";
+        auto &prop = (texture["prop"] = nlohmann::json::object());
+        // TODO
+        texture["impl"] = "Constant";
+        prop["v"] = {1.f, 1.f, 1.f, 1.f};
+        switch (base_texture->type()) {
+            case minipbrt::TextureType::Bilerp: break;
+            case minipbrt::TextureType::Checkerboard2D: break;
+            case minipbrt::TextureType::Checkerboard3D: break;
+            case minipbrt::TextureType::Constant: break;
+            case minipbrt::TextureType::Dots: break;
+            case minipbrt::TextureType::FBM: break;
+            case minipbrt::TextureType::ImageMap: break;
+            case minipbrt::TextureType::Marble: break;
+            case minipbrt::TextureType::Mix: break;
+            case minipbrt::TextureType::Scale: break;
+            case minipbrt::TextureType::UV: break;
+            case minipbrt::TextureType::Windy: break;
+            case minipbrt::TextureType::Wrinkled: break;
+            case minipbrt::TextureType::PTex: break;
+        }
+        converted[texture_name(scene, texture_index)] = texture;
+    }
 }
 
 static void convert_materials(const minipbrt::Scene *scene,
                               nlohmann::json &converted) noexcept {
+    for (auto i = 0u; i < scene->materials.size(); i++) {
+        auto base_material = scene->materials[i];
+        if (base_material->bumpmap != minipbrt::kInvalidIndex) {
+            eprintln("Ignored unsupported material bump map at index {}.", i);
+        }
+        auto material = nlohmann::json::object();
+        material["type"] = "Surface";
+        auto &prop = (material["prop"] = nlohmann::json::object());
+        material["impl"] = "Matte";
+        // TODO
+        switch (auto material_type = base_material->type()) {
+            case minipbrt::MaterialType::Disney: break;
+            case minipbrt::MaterialType::Fourier: break;
+            case minipbrt::MaterialType::Glass: break;
+            case minipbrt::MaterialType::Hair: break;
+            case minipbrt::MaterialType::KdSubsurface: break;
+            case minipbrt::MaterialType::Matte: break;
+            case minipbrt::MaterialType::Metal: break;
+            case minipbrt::MaterialType::Mirror: break;
+            case minipbrt::MaterialType::Mix: break;
+            case minipbrt::MaterialType::None: break;
+            case minipbrt::MaterialType::Plastic: break;
+            case minipbrt::MaterialType::Substrate: break;
+            case minipbrt::MaterialType::Subsurface: break;
+            case minipbrt::MaterialType::Translucent: break;
+            case minipbrt::MaterialType::Uber: break;
+        }
+        auto name = material_name(scene, i);
+        converted[name] = material;
+    }
+}
+
+[[nodiscard]] static nlohmann::json convert_film(const minipbrt::Scene *scene,
+                                                 nlohmann::json &converted) noexcept {
+    auto base_film = scene->film;
+    expect(base_film->type() == minipbrt::FilmType::Image,
+           "Unsupported film type {}.", magic_enum::enum_name(base_film->type()));
+    auto image = static_cast<const minipbrt::ImageFilm *>(base_film);
+    auto film = nlohmann::json::object();
+    auto max_lum = image->maxsampleluminance <= 0.f ? 65536.f : image->maxsampleluminance;
+    return {
+        {"impl", "Color"},
+        {"prop",
+         {{"resolution", nlohmann::json::array({image->xresolution, image->yresolution})},
+          {"exposure", std::log2(image->scale)},
+          {"clamp", std::clamp(max_lum, 16.f, 65536.f)}}}};
+}
+
+static void convert_camera(const minipbrt::Scene *scene,
+                           nlohmann::json &converted) noexcept {
+    auto base_camera = scene->camera;
+    expect(base_camera->type() == minipbrt::CameraType::Perspective,
+           "Unsupported camera type {}.", magic_enum::enum_name(base_camera->type()));
+    auto camera = nlohmann::json::object();
+    camera["type"] = "Camera";
+    camera["impl"] = "Pinhole";
+    auto perspective = static_cast<const minipbrt::PerspectiveCamera *>(base_camera);
+    auto &prop = (camera["prop"] = nlohmann::json::object());
+    prop["transform"] = convert_camera_transform(scene, perspective->cameraToWorld);
+    prop["fov"] = perspective->fov;
+    prop["film"] = convert_film(scene, converted);
+    prop["file"] = "render.exr";
+    prop["spp"] = 1024;
+    converted["render"]["cameras"] = nlohmann::json::array({camera});
+}
+
+static void dump_converted_scene(const std::filesystem::path &base_dir,
+                                 std::string_view name,
+                                 nlohmann::json converted) noexcept {
+    auto render = std::move(converted["render"]);
+    converted.erase("render");
+    auto shapes = std::move(render["shapes"]);
+    render.erase("shapes");
+    converted["renderable"] = {
+        {"type", "Shape"},
+        {"impl", "Group"},
+        {"prop", {{"shapes", std::move(shapes)}}}};
+    render["shapes"] = nlohmann::json::array({"@renderable"});
+    nlohmann::json entry = {
+        {"render", std::move(render)},
+        {"import", nlohmann::json::array({std::format("{}.exported.json", name)})},
+    };
+    auto write_json = [&base_dir](std::string_view file_name, const nlohmann::json &json) {
+        std::ofstream f{base_dir / file_name};
+        f << json.dump(4);
+    };
+    write_json(std::format("{}.exported.json", name), converted);
+    write_json(std::format("{}.json", name), entry);
 }
 
 static void convert_scene(const std::filesystem::path &source_path,
@@ -272,7 +447,7 @@ static void convert_scene(const std::filesystem::path &source_path,
         nlohmann::json converted{
             {"render",
              {{"integrator",
-               {{"impl", "MegaPath"},
+               {{"impl", "Normal"},
                 {"prop",
                  {{"depth", 16},
                   {"rr_depth", 5}}}}},
@@ -281,8 +456,9 @@ static void convert_scene(const std::filesystem::path &source_path,
         convert_materials(scene, converted);
         convert_area_lights(scene, converted);
         convert_shapes(base_dir, scene, converted);
-        // TODO
-        println("Converted:\n{}", converted.dump(4).c_str());
+        convert_camera(scene, converted);
+        auto name = source_path.stem().string();
+        dump_converted_scene(base_dir, name, std::move(converted));
     } catch (const std::exception &e) {
         luisa::panic("{}", e.what());
     }

@@ -9,5 +9,6 @@ add_executable(pbrt2luisa
 target_link_libraries(pbrt2luisa PRIVATE
         minipbrt-object
         nlohmann-json
-        magic_enum)
+        magic_enum
+        glm::glm-header-only)
 
