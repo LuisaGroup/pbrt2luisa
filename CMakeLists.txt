@@ -3,4 +3,4 @@ project(pbrt2luisa)
 
 set(CMAKE_CXX_STANDARD 20)
 
-add_executable(pbrt2luisa main.cpp)
+add_subdirectory(src)
