@@ -191,6 +191,9 @@ static void convert_lights(
                                        convert_transform(scene, base_light->lightToWorld)
                                    })}
                 });
+                prop["light"] = light;
+                converted[std::format("Light:{}", light_index)] = light;
+                break;
             }
             default: eprintln("Ignored unsupported light at index {} with type '{}'.",
                               light_index, magic_enum::enum_name(light_type));
@@ -206,6 +209,7 @@ static void convert_scene(const std::filesystem::path &source_path,
         auto base_dir = source_path.parent_path();
         auto converted = nlohmann::json::object();
         convert_shapes(base_dir, scene, converted);
+        convert_lights(base_dir, scene, converted);
         // TODO
         println("Converted:\n{}", converted.dump(4).c_str());
     // } catch (const std::exception &e) {
