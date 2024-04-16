@@ -34,4 +34,9 @@ template<typename... Args>
     std::exit(EXIT_FAILURE);
 }
 
+template<typename... Args>
+void expect(bool condition, const std::format_string<Args...> fmt, Args &&...args) noexcept {
+    if (!condition) { panic(fmt, std::forward<Args>(args)...); }
+}
+
 }// namespace luisa
