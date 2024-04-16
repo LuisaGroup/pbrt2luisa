@@ -35,7 +35,6 @@ static void dump_mesh_to_wavefront_obj(
     static std::string buffer;
     buffer.resize(1024u * 1024u - 1u);
     buffer.clear();
-
 }
 
 static void convert_shapes(
@@ -81,6 +80,56 @@ static void convert_shapes(
         }
         if (shape.contains("impl")) {
             converted[std::format("Shape:{}", shape_index)] = shape;
+        }
+    }
+}
+
+static void convert_lights(
+    const std::filesystem::path &base_dir,
+    const minipbrt::Scene *scene,
+    nlohmann::json &converted) {
+    for (auto light_index = 0u; light_index < scene->lights.size(); light_index++) {
+        auto base_light = scene->lights[light_index];
+        auto light = nlohmann::json::object({{"type", "Light"}, {"impl", "Diffuse"}, {"prop", nlohmann::json::object()}});
+        auto &emission = light["emission"];
+        emission["type"] = "Texture";
+        emission["impl"] = "Constant";
+        switch (auto light_type = base_light->type()) {
+            case minipbrt::LightType::Point: {
+                // light
+                auto point_light = static_cast<minipbrt::PointLight *>(base_light);
+                emission["prop"] = nlohmann::json::object({{"v", nlohmann::json::array({
+                                                                     base_light->scale[0] * point_light->I[0],
+                                                                     base_light->scale[1] * point_light->I[1],
+                                                                     base_light->scale[2] * point_light->I[2],
+                                                                 })}});
+
+                // shape
+                auto light_shape = nlohmann::json::object({{"type", "Shape"}, {"impl", "Sphere"}});
+                auto &prop = (light_shape["prop"] = nlohmann::json::object());
+                // transform
+                auto position_transform = nlohmann::json::object({
+                    {"type", "transform"}, {"impl", "SRT"},
+                    {"prop", nlohmann::json::object({
+                                 {"translate", nlohmann::json::array({
+                                                   point_light->from[0], point_light->from[1], point_light->from[2]
+                                               })}
+                             })}
+                });
+
+
+                prop["transform"] = nlohmann::json::object({
+                    {"type", "transform"}, {"impl", "Stack"}
+                });
+                prop["transform"]["prop"] = nlohmann::json::object({
+                    {"transforms", nlohmann::json::array({
+                                       position_transform,
+                                       convert_transform(scene, base_light->lightToWorld)
+                                   })}
+                });
+            }
+            default: eprintln("Ignored unsupported light at index {} with type '{}'.",
+                              light_index, magic_enum::enum_name(light_type));
         }
     }
 }
