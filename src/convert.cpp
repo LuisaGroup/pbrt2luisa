@@ -438,6 +438,59 @@ static void dump_converted_scene(const std::filesystem::path &base_dir,
     write_json(std::format("{}.json", name), entry);
 }
 
+static void convert_lights(
+    const std::filesystem::path &base_dir,
+    const minipbrt::Scene *scene,
+    nlohmann::json &converted) {
+    for (auto light_index = 0u; light_index < scene->lights.size(); light_index++) {
+        auto base_light = scene->lights[light_index];
+        auto light = nlohmann::json::object({{"type", "Light"}, {"impl", "Diffuse"}, {"prop", nlohmann::json::object()}});
+        auto &emission = light["emission"];
+        emission["type"] = "Texture";
+        emission["impl"] = "Constant";
+        switch (auto light_type = base_light->type()) {
+            case minipbrt::LightType::Point: {
+                // light
+                auto point_light = static_cast<minipbrt::PointLight *>(base_light);
+                emission["prop"] = nlohmann::json::object({{"v", nlohmann::json::array({
+                                                                     base_light->scale[0] * point_light->I[0],
+                                                                     base_light->scale[1] * point_light->I[1],
+                                                                     base_light->scale[2] * point_light->I[2],
+                                                                 })}});
+
+                // shape
+                auto light_shape = nlohmann::json::object({{"type", "Shape"}, {"impl", "Sphere"}});
+                auto &prop = (light_shape["prop"] = nlohmann::json::object());
+                // transform
+                auto position_transform = nlohmann::json::object({
+                    {"type", "transform"}, {"impl", "SRT"},
+                    {"prop", nlohmann::json::object({
+                                 {"translate", nlohmann::json::array({
+                                                   point_light->from[0], point_light->from[1], point_light->from[2]
+                                               })}
+                             })}
+                });
+
+
+                prop["transform"] = nlohmann::json::object({
+                    {"type", "transform"}, {"impl", "Stack"}
+                });
+                prop["transform"]["prop"] = nlohmann::json::object({
+                    {"transforms", nlohmann::json::array({
+                                       position_transform,
+                                       convert_transform(scene, base_light->lightToWorld)
+                                   })}
+                });
+                prop["light"] = light;
+                converted[std::format("Light:{}", light_index)] = light;
+                break;
+            }
+            default: eprintln("Ignored unsupported light at index {} with type '{}'.",
+                              light_index, magic_enum::enum_name(light_type));
+        }
+    }
+}
+
 static void convert_scene(const std::filesystem::path &source_path,
                           const minipbrt::Scene *scene) noexcept {
     try {
@@ -456,6 +509,7 @@ static void convert_scene(const std::filesystem::path &source_path,
         convert_materials(scene, converted);
         convert_area_lights(scene, converted);
         convert_shapes(base_dir, scene, converted);
+        convert_lights(base_dir, scene, converted);
         convert_camera(scene, converted);
         auto name = source_path.stem().string();
         dump_converted_scene(base_dir, name, std::move(converted));
