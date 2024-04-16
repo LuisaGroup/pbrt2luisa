@@ -7,3 +7,6 @@ target_link_libraries(minipbrt-object PUBLIC minipbrt)
 
 add_library(nlohmann-json INTERFACE)
 target_include_directories(nlohmann-json INTERFACE $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/json/single_include>)
+
+add_library(magic_enum INTERFACE)
+target_include_directories(magic_enum INTERFACE $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/magic_enum/include>)

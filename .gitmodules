@@ -4,3 +4,6 @@
 [submodule "src/ext/json"]
 	path = src/ext/json
 	url = https://github.com/nlohmann/json.git
+[submodule "src/ext/magic_enum"]
+	path = src/ext/magic_enum
+	url = https://github.com/Neargye/magic_enum.git
