@@ -482,7 +482,21 @@ static void convert_lights(
                                    })}
                 });
                 prop["light"] = light;
-                converted[std::format("Light:{}", light_index)] = light;
+//                converted[std::format("Light:{}", light_index)] = light;
+                break;
+            }
+            case minipbrt::LightType::Infinite: {
+                auto infinite_light = static_cast<minipbrt::InfiniteLight*>(base_light);
+                auto env = nlohmann::json::object({
+                    {"type", "Environment"}, {"impl", "Spherical"},
+                    {"prop", {{"emission", {
+                        {"type", "Texture"}, {"impl", "Image"},
+                        {"prop", { {"file", infinite_light->mapname} }}
+                    }}}}
+                });
+                auto name = std::format("EnvLight:{}", light_index);
+                converted[name] = env;
+                converted["render"]["environment"] = "@" + name;
                 break;
             }
             default: eprintln("Ignored unsupported light at index {} with type '{}'.",
