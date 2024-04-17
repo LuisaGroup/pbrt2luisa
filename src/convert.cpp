@@ -458,9 +458,10 @@ static void convert_materials(const minipbrt::Scene *scene,
             case minipbrt::MaterialType::Glass: {
                 auto glass_material = static_cast<minipbrt::GlassMaterial *>(base_material);
                 material["impl"] = "Glass";
-                color_tex_parsing(scene, prop, "roughness", glass_material->Kr);
+                color_tex_parsing(scene, prop, "Kr", glass_material->Kr);
                 color_tex_parsing(scene, prop, "Kt", glass_material->Kt);
                 float_tex_parsing(scene, prop, "eta", glass_material->eta);
+                float_tex_parsing(scene, prop, "roughness", glass_material->uroughness);
                 break;
             }
                 //            case minipbrt::MaterialType::Hair: break;
