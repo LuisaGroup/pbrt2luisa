@@ -554,9 +554,18 @@ static void convert_camera(const minipbrt::Scene *scene,
            "Unsupported camera type {}.", magic_enum::enum_name(base_camera->type()));
     auto camera = nlohmann::json::object();
     camera["type"] = "Camera";
-    camera["impl"] = "Pinhole";
     auto perspective = static_cast<const minipbrt::PerspectiveCamera *>(base_camera);
     auto &prop = (camera["prop"] = nlohmann::json::object());
+    if (perspective->lensradius > 0.f) {
+        // FOV = 2 arctan h/2f => fov / 2 = arctan h / 2f => tan(fov / 2) = h / 2f =>
+        auto focal_length = (24. / 2.) / (std::tan(glm::radians(perspective->fov / 2.)));
+        auto focus_distance = perspective->focaldistance;
+        camera["impl"] = "ThinLens";
+        prop["focal_length"] = focal_length;
+        prop["focus_distance"] = focus_distance;
+    } else {
+        camera["impl"] = "Pinhole";
+    }
     prop["transform"] = convert_camera_transform(scene, perspective->cameraToWorld);
     prop["fov"] = perspective->fov;
     prop["film"] = convert_film(scene, converted);
