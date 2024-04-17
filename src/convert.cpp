@@ -58,24 +58,6 @@ namespace luisa::render {
 [[nodiscard]] static nlohmann::json convert_camera_transform(
     const minipbrt::Scene *scene,
     const minipbrt::Transform &transform) noexcept {
-    /*
-    def transform(v):
-        v = np.reshape(np.array(v + [1.0]), [4, 1])
-        v = np.reshape(np.matmul(matrix, v), [4])
-        return v[:3] / v[3]
-
-    def transform_normal(n):
-        n = np.reshape(np.array(n), [3, 1])
-        n = np.reshape(np.matmul(np.transpose(np.linalg.inv(matrix[:3, :3])), n), [3])
-        n = np.array([e if abs(e) > 1e-5 else 0.0 for e in n])
-        return n / np.linalg.norm(n)
-
-    eye = transform([0.0, 0.0, 0.0])
-    up = transform_normal([0.0, 1.0, 0.0])
-    lookat = eye + transform_normal([0.0, 0.0, 1.0])
-    scene["Camera"].append([["time", [0.0]], ["position", eye], ["up", up], ["lookAt", lookat]])
-    return scene, loc
-     */
     // TODO: consider animated transform
     glm::mat4 m;
     for (auto i = 0; i < 4; i++) {
@@ -93,12 +75,23 @@ namespace luisa::render {
     auto eye = transform_point(glm::vec3(0.f));
     auto up = transform_normal(glm::vec3(0.f, 1.f, 0.f));
     auto front = transform_normal(glm::vec3(0.f, 0.f, 1.f));
-    return {
+    auto right = transform_normal(glm::vec3(1.f, 0.f, 0.f));
+    nlohmann::json t{
         {"impl", "View"},
         {"prop",
          {{"origin", {eye.x, eye.y, eye.z}},
           {"front", {front.x, front.y, front.z}},
           {"up", {up.x, up.y, up.z}}}}};
+    if (glm::dot(glm::cross(front, right), up) <= 0) {// right handed as we wanted
+        return t;
+    }
+    nlohmann::json s{
+        {"impl", "SRT"},
+        {"prop", {{"scale", {-1., 1., 1.}}}}};
+    return {
+        {"impl", "Stack"},
+        {"prop",
+         {{"transforms", {std::move(s), std::move(t)}}}}};
 }
 
 static void dump_mesh_to_wavefront_obj(
