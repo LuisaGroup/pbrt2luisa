@@ -185,6 +185,66 @@ static void dump_mesh_to_wavefront_obj(
     return luisa::format("Texture:{}:{}", index, name ? name : "unnamed");
 }
 
+static void color_tex_parsing(
+    const minipbrt::Scene *scene,
+    nlohmann::json &prop,
+    const std::string &name,
+    const minipbrt::ColorTex &tex) {
+    if (tex.texture == minipbrt::kInvalidIndex) {
+        prop[name] = nlohmann::json::object(
+            {{"type", "Texture"},
+             {"impl", "Constant"},
+             {"prop",
+              {{"v", nlohmann::json::array({
+                         tex.value[0],
+                         tex.value[1],
+                         tex.value[2],
+                     })}}}});
+    } else {
+        prop[name] = "@" + texture_name(scene, tex.texture);
+    }
+}
+
+static void float_tex_parsing(const minipbrt::Scene *scene,
+                              nlohmann::json &prop,
+                              const std::string &name,
+                              const minipbrt::FloatTex &tex) {
+    if (tex.texture == minipbrt::kInvalidIndex) {
+        prop[name] = nlohmann::json::object(
+            {{"type", "Texture"},
+             {"impl", "Constant"},
+             {"prop", {{"v", tex.value}}}});
+    } else {
+        prop[name] = "@" + texture_name(scene, tex.texture);
+    }
+}
+
+static void concat_tex_parsing(const minipbrt::Scene *scene,
+                               nlohmann::json &prop,
+                               const std::string &name,
+                               const std::vector<const minipbrt::FloatTex *> &textures) {
+    auto channels = nlohmann::json::array();
+    for (auto tex : textures) {
+        auto temp = nlohmann::json::object({});
+        float_tex_parsing(scene, temp, "value", *tex);
+        channels.emplace_back(std::move(temp["value"]));
+    }
+    prop[name] = nlohmann::json::object(
+        {{"type", "Texture"},
+         {"impl", "Concat"},
+         {"prop", {{"channels", channels}}}});
+}
+
+static void metal_eta_k_parsing(const minipbrt::Scene *scene,
+                                nlohmann::json &prop,
+                                const std::string &name,
+                                const minipbrt::ColorTex &eta_tex,
+                                const minipbrt::ColorTex &k_tex) {
+    //    expect(eta_tex.texture != minipbrt::kInvalidIndex, "Invalid eta texture index.");
+    //    expect(k_tex.texture != minipbrt::kInvalidIndex, "Invalid k texture index.");
+    eprintln("Unsupported metal eta/k parsing.");
+}
+
 static void convert_shapes(
     const std::filesystem::path &base_dir,
     const minipbrt::Scene *scene,
@@ -340,10 +400,9 @@ static void convert_area_lights(const minipbrt::Scene *scene,
         prop["emission"] = {
             {"impl", "Constant"},
             {"prop",
-             {"v",
-              {base_light->scale[0] * diffuse->L[0],
-               base_light->scale[1] * diffuse->L[1],
-               base_light->scale[2] * diffuse->L[2]}}}};
+             {{"v", nlohmann::json::array({base_light->scale[0] * diffuse->L[0],
+                                           base_light->scale[1] * diffuse->L[1],
+                                           base_light->scale[2] * diffuse->L[2]})}}}};
         prop["two_sided"] = diffuse->twosided;
         converted[luisa::format("AreaLight:{}", i)] = light;
     }
@@ -360,6 +419,13 @@ static void convert_textures(const std::filesystem::path &base_dir,
         texture["impl"] = "Constant";
         prop["v"] = {1.f, 1.f, 1.f, 1.f};
         switch (base_texture->type()) {
+            case minipbrt::TextureType::Scale: {
+                auto s = static_cast<const minipbrt::ScaleTexture *>(base_texture);
+                texture["impl"] = "Multiply";
+                color_tex_parsing(scene, prop, "a", s->tex1);
+                color_tex_parsing(scene, prop, "b", s->tex2);
+                break;
+            }
             case minipbrt::TextureType::Constant: {
                 auto c = static_cast<const minipbrt::ConstantTexture *>(base_texture);
                 texture["impl"] = "Constant";
@@ -368,43 +434,37 @@ static void convert_textures(const std::filesystem::path &base_dir,
             }
             case minipbrt::TextureType::ImageMap: {
                 auto image = static_cast<const minipbrt::ImageMapTexture *>(base_texture);
-                texture["impl"] = "Image";
-                if (auto mapping = image->mapping; mapping == minipbrt::TexCoordMapping::UV) {
-                    prop["uv_scale"] = {image->uscale, image->vscale};
-                    prop["uv_offset"] = {image->udelta, image->vdelta};
-                    switch (image->wrap) {
-                        case minipbrt::WrapMode::Repeat: prop["address"] = "repeat"; break;
-                        case minipbrt::WrapMode::Black: prop["address"] = "zero"; break;
-                        case minipbrt::WrapMode::Clamp: prop["address"] = "edge"; break;
-                    }
-                } else {
-                    eprintln("Ignored unsupported texture mapping at index {} with type '{}'.",
-                             texture_index, magic_enum::enum_name(mapping));
-                }
-                prop["scale"] = image->scale;
                 expect(image->filename != nullptr, "Image filename is null.");
-                auto file = [&base_dir, image] {
-                    try {
-                        std::filesystem::path file{image->filename};
-                        if (!file.is_absolute()) { file = base_dir / file; }
-                        return std::filesystem::canonical(file);
-                    } catch (const std::exception &e) {
-                        panic("Failed to resolve image file path: {}.", e.what());
-                    }
-                }();
-                auto copied_file = luisa::format("lr_exported_textures/{:05}_{}",
-                                                 texture_index, file.filename().generic_string());
                 try {
+                    std::filesystem::path file{image->filename};
+                    if (!file.is_absolute()) { file = base_dir / file; }
+                    file = std::filesystem::canonical(file);
+                    auto copied_file = luisa::format("lr_exported_textures/{:05}_{}",
+                                                     texture_index, file.filename().generic_string());
                     std::filesystem::create_directories(base_dir / "lr_exported_textures");
                     std::filesystem::copy(file, base_dir / copied_file, std::filesystem::copy_options::update_existing);
+                    texture["impl"] = "Image";
+                    if (auto mapping = image->mapping; mapping == minipbrt::TexCoordMapping::UV) {
+                        prop["uv_scale"] = {image->uscale, image->vscale};
+                        prop["uv_offset"] = {image->udelta, image->vdelta};
+                        switch (image->wrap) {
+                            case minipbrt::WrapMode::Repeat: prop["address"] = "repeat"; break;
+                            case minipbrt::WrapMode::Black: prop["address"] = "zero"; break;
+                            case minipbrt::WrapMode::Clamp: prop["address"] = "edge"; break;
+                        }
+                    } else {
+                        eprintln("Ignored unsupported texture mapping at index {} with type '{}'.",
+                                 texture_index, magic_enum::enum_name(mapping));
+                    }
+                    prop["scale"] = image->scale;
+                    prop["file"] = copied_file;
+                    if (image->dataType == minipbrt::TextureData::Float) {
+                        prop["encoding"] = "Linear";
+                    } else if (image->gamma) {
+                        prop["encoding"] = "sRGB";
+                    }
                 } catch (const std::exception &e) {
-                    panic("Failed to copy image file: {}.", e.what());
-                }
-                prop["file"] = copied_file;
-                if (image->dataType == minipbrt::TextureData::Float) {
-                    prop["encoding"] = "Linear";
-                } else if (image->gamma) {
-                    prop["encoding"] = "sRGB";
+                    eprintln("Failed to copy image file: {}.", e.what());
                 }
                 break;
             }
@@ -417,66 +477,6 @@ static void convert_textures(const std::filesystem::path &base_dir,
         }
         converted[texture_name(scene, texture_index)] = texture;
     }
-}
-
-static void color_tex_parsing(
-    const minipbrt::Scene *scene,
-    nlohmann::json &prop,
-    const std::string &name,
-    const minipbrt::ColorTex &tex) {
-    if (tex.texture == minipbrt::kInvalidIndex) {
-        prop[name] = nlohmann::json::object(
-            {{"type", "Texture"},
-             {"impl", "Constant"},
-             {"prop",
-              {{"v", {
-                         tex.value[0],
-                         tex.value[1],
-                         tex.value[2],
-                     }}}}});
-    } else {
-        prop[name] = "@" + texture_name(scene, tex.texture);
-    }
-}
-
-static void float_tex_parsing(const minipbrt::Scene *scene,
-                              nlohmann::json &prop,
-                              const std::string &name,
-                              const minipbrt::FloatTex &tex) {
-    if (tex.texture == minipbrt::kInvalidIndex) {
-        prop[name] = nlohmann::json::object(
-            {{"type", "Texture"},
-             {"impl", "Constant"},
-             {"prop", {{"v", tex.value}}}});
-    } else {
-        prop[name] = "@" + texture_name(scene, tex.texture);
-    }
-}
-
-static void concat_tex_parsing(const minipbrt::Scene *scene,
-                               nlohmann::json &prop,
-                               const std::string &name,
-                               const std::vector<const minipbrt::FloatTex *> &textures) {
-    auto channels = nlohmann::json::array();
-    for (auto tex : textures) {
-        auto temp = nlohmann::json::object({});
-        float_tex_parsing(scene, temp, "value", *tex);
-        channels.emplace_back(std::move(temp["value"]));
-    }
-    prop[name] = nlohmann::json::object(
-        {{"type", "Texture"},
-         {"impl", "Concat"},
-         {"prop", {{"channels", channels}}}});
-}
-
-static void metal_eta_k_parsing(const minipbrt::Scene *scene,
-                                nlohmann::json &prop,
-                                const std::string &name,
-                                const minipbrt::ColorTex &eta_tex,
-                                const minipbrt::ColorTex &k_tex) {
-    //    expect(eta_tex.texture != minipbrt::kInvalidIndex, "Invalid eta texture index.");
-    //    expect(k_tex.texture != minipbrt::kInvalidIndex, "Invalid k texture index.");
-    eprintln("Unsupported metal eta/k parsing.");
 }
 
 [[nodiscard]] static std::string convert_bump_to_normal(const std::filesystem::path &base_dir,
@@ -502,6 +502,7 @@ static void convert_materials(const std::filesystem::path &base_dir,
         material["type"] = "Surface";
         material["impl"] = "Matte";
         auto &prop = (material["prop"] = nlohmann::json::object());
+        prop["source"] = magic_enum::enum_name(base_material->type());
         if (auto b = base_material->bumpmap; b != minipbrt::kInvalidIndex) {
             if (auto normal_texture_name = convert_bump_to_normal(base_dir, scene, b, converted);
                 !normal_texture_name.empty()) {
@@ -796,7 +797,7 @@ static void convert_lights(const std::filesystem::path &base_dir,
                     auto &e = (prop["emission"] = nlohmann::json::object(
                                    {{"type", "Texture"},
                                     {"impl", "Constant"},
-                                    {"prop", {{"v", {L[0] * s, L[1] * s, L[2] * s}}}}}));
+                                    {"prop", {{"v", nlohmann::json::array({L[0] * s, L[1] * s, L[2] * s})}}}}));
                     glm::mat4 m;
                     for (auto i = 0; i < 4; i++) {
                         for (auto j = 0; j < 4; j++) {
@@ -861,9 +862,9 @@ static void convert_lights(const std::filesystem::path &base_dir,
                 } else {
                     e["impl"] = "Constant";
                     e["prop"] = {{"v",
-                                  {infinite_light->L[0],
-                                   infinite_light->L[1],
-                                   infinite_light->L[2]}}};
+                                  nlohmann::json::array({infinite_light->L[0],
+                                                         infinite_light->L[1],
+                                                         infinite_light->L[2]})}};
                 }
                 if (auto scale = base_light->scale;
                     scale[0] == scale[1] && scale[1] == scale[2]) {
@@ -884,9 +885,14 @@ static void convert_lights(const std::filesystem::path &base_dir,
                               light_index, magic_enum::enum_name(light_type));
         }
     }
-    converted["render"]["environment"] = nlohmann::json::object({{"type", "Environment"}, {"impl", "Grouped"}, {"prop", {{"environments", nlohmann::json::array()}}}});
-    for (auto &item : env_array) {
-        converted["render"]["environment"]["prop"]["environments"].emplace_back(item);
+    println("Environment count: {}", env_array.size());
+    if (env_array.size() == 1u) {
+        converted["render"]["environment"] = env_array[0];
+    } else if (env_array.size() > 1u) {
+        converted["render"]["environment"] = nlohmann::json::object({{"type", "Environment"}, {"impl", "Grouped"}, {"prop", {{"environments", nlohmann::json::array()}}}});
+        for (auto &item : env_array) {
+            converted["render"]["environment"]["prop"]["environments"].emplace_back(item);
+        }
     }
 }
 
