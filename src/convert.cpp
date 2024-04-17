@@ -9,6 +9,7 @@
 #include <nlohmann/json.hpp>
 #include <magic_enum/magic_enum.hpp>
 #include <glm/glm.hpp>
+#include <glm/gtc/matrix_transform.hpp>
 #include <minipbrt.h>
 
 #include "logging.h"
@@ -24,9 +25,7 @@ namespace luisa::render {
     return x * std::numbers::pi / 180.;
 }
 
-[[nodiscard]] static nlohmann::json convert_transform(
-    const minipbrt::Scene *scene,
-    const minipbrt::Transform &transform) noexcept {
+[[nodiscard]] static nlohmann::json convert_transform(const minipbrt::Transform &transform) noexcept {
     // TODO: consider animated transform
     // check if is identity
     float identity[4][4]{
@@ -56,9 +55,7 @@ namespace luisa::render {
         {"prop", {{"m", m}}}};
 }
 
-[[nodiscard]] static nlohmann::json convert_camera_transform(
-    const minipbrt::Scene *scene,
-    const minipbrt::Transform &transform) noexcept {
+[[nodiscard]] static nlohmann::json convert_camera_transform(const minipbrt::Transform &transform) noexcept {
     // TODO: consider animated transform
     glm::mat4 m;
     for (auto i = 0; i < 4; i++) {
@@ -93,6 +90,21 @@ namespace luisa::render {
         {"impl", "Stack"},
         {"prop",
          {{"transforms", {std::move(s), std::move(t)}}}}};
+}
+
+[[nodiscard]] static nlohmann::json convert_envmap_transform(const minipbrt::Transform &transform) noexcept {
+    glm::mat4 m;
+    for (auto i = 0; i < 4; i++) {
+        for (auto j = 0; j < 4; j++) {
+            m[i][j] = transform.start[j][i];
+        }
+    }
+    auto n = transpose(glm::inverse(glm::mat3(m))) *
+             glm::mat3(glm::rotate(glm::mat4(1.f), .5f * std::numbers::pi_v<float>, glm::vec3(0, 1, 0))) *
+                 glm::mat3(glm::scale(glm::mat4(1.f), glm::vec3(1, 1, 1)));
+    return {
+        {"impl", "Matrix"},
+        {"prop", {{"m", {n[0][0], n[1][0], n[2][0], 0, n[0][1], n[1][1], n[2][1], 0, n[0][2], n[1][2], n[2][2], 0, 0, 0, 0, 1}}}}};
 }
 
 static void dump_mesh_to_wavefront_obj(
@@ -192,7 +204,7 @@ static void convert_shapes(
         shape["type"] = "Shape";
         auto &prop = (shape["prop"] = nlohmann::json::object());
         // transform
-        if (auto t = convert_transform(scene, base_shape->shapeToWorld); !t.is_null()) {
+        if (auto t = convert_transform(base_shape->shapeToWorld); !t.is_null()) {
             prop["transform"] = std::move(t);
         }
         // surface
@@ -266,7 +278,7 @@ static void convert_shapes(
         object["impl"] = "Group";
         auto &prop = (object["prop"] = nlohmann::json::object());
         // transform
-        if (auto t = convert_transform(scene, base_object->objectToInstance); !t.is_null()) {
+        if (auto t = convert_transform(base_object->objectToInstance); !t.is_null()) {
             prop["transform"] = std::move(t);
         }
         auto &shapes = (prop["shapes"] = nlohmann::json::array());
@@ -299,7 +311,7 @@ static void convert_shapes(
             instance["impl"] = "Instance";
             auto &prop = (instance["prop"] = nlohmann::json::object());
             // transform
-            if (auto t = convert_transform(scene, base_instance->instanceToWorld); !t.is_null()) {
+            if (auto t = convert_transform(base_instance->instanceToWorld); !t.is_null()) {
                 prop["transform"] = std::move(t);
             }
             if (auto l = base_instance->areaLight; l != minipbrt::kInvalidIndex) {
@@ -359,6 +371,11 @@ static void convert_textures(const std::filesystem::path &base_dir,
                 if (auto mapping = image->mapping; mapping == minipbrt::TexCoordMapping::UV) {
                     prop["uv_scale"] = {image->uscale, image->vscale};
                     prop["uv_offset"] = {image->udelta, image->vdelta};
+                    switch (image->wrap) {
+                        case minipbrt::WrapMode::Repeat: prop["address"] = "repeat"; break;
+                        case minipbrt::WrapMode::Black: prop["address"] = "zero"; break;
+                        case minipbrt::WrapMode::Clamp: prop["address"] = "edge"; break;
+                    }
                 } else {
                     eprintln("Ignored unsupported texture mapping at index {} with type '{}'.",
                              texture_index, magic_enum::enum_name(mapping));
@@ -383,7 +400,11 @@ static void convert_textures(const std::filesystem::path &base_dir,
                     panic("Failed to copy image file: {}.", e.what());
                 }
                 prop["file"] = copied_file;
-                if (image->gamma) { prop["encoding"] = "sRGB"; }
+                if (image->dataType == minipbrt::TextureData::Float) {
+                    prop["encoding"] = "Linear";
+                } else if (image->gamma) {
+                    prop["encoding"] = "sRGB";
+                }
                 break;
             }
             default: {
@@ -507,6 +528,7 @@ static void convert_materials(const std::filesystem::path &base_dir,
                 color_tex_parsing(scene, prop, "Kt", glass_material->Kt);
                 float_tex_parsing(scene, prop, "eta", glass_material->eta);
                 float_tex_parsing(scene, prop, "roughness", glass_material->uroughness);
+                prop["remap_roughness"] = glass_material->remaproughness;
                 break;
             }
                 //            case minipbrt::MaterialType::Hair: break;
@@ -564,9 +586,12 @@ static void convert_materials(const std::filesystem::path &base_dir,
                 //            case minipbrt::MaterialType::Subsurface: break;
             case minipbrt::MaterialType::Translucent: {
                 auto translucent_material = static_cast<minipbrt::TranslucentMaterial *>(base_material);
-                material["impl"] = "Plastic";
+                material["impl"] = "Disney";
                 color_tex_parsing(scene, prop, "Kd", translucent_material->Kd);
+                color_tex_parsing(scene, prop, "specular_trans", translucent_material->Ks);
                 float_tex_parsing(scene, prop, "roughness", translucent_material->roughness);
+                prop["thin"] = true;
+                prop["remap_roughness"] = translucent_material->remaproughness;
                 break;
             }
             case minipbrt::MaterialType::Uber: {
@@ -574,10 +599,11 @@ static void convert_materials(const std::filesystem::path &base_dir,
                 material["impl"] = "Disney";
                 color_tex_parsing(scene, prop, "Kd", uber_material->Kd);
                 float_tex_parsing(scene, prop, "eta", uber_material->eta);
-                color_tex_parsing(scene, prop, "metallic", uber_material->Ks);
+                //                color_tex_parsing(scene, prop, "metallic", uber_material->Ks);
                 float_tex_parsing(scene, prop, "roughness", uber_material->uroughness);
                 color_tex_parsing(scene, prop, "alpha", uber_material->opacity);
                 color_tex_parsing(scene, prop, "specular_trans", uber_material->Kt);
+                prop["remap_roughness"] = uber_material->remaproughness;
                 break;
             }
             default: eprintln("Ignored unsupported material at index {} with type '{}'.",
@@ -640,7 +666,7 @@ static void convert_camera(const minipbrt::Scene *scene,
             return f;
         }();
     }
-    prop["transform"] = convert_camera_transform(scene, perspective->cameraToWorld);
+    prop["transform"] = convert_camera_transform(perspective->cameraToWorld);
     prop["film"] = convert_film(scene->film);
     if (auto filter = scene->filter) { prop["filter"] = convert_filter(filter); }
     prop["file"] = [scene]() noexcept -> std::string {
@@ -718,7 +744,7 @@ static void convert_lights(const std::filesystem::path &base_dir,
                 prop["transform"] = nlohmann::json::object({{"type", "transform"}, {"impl", "Stack"}});
                 prop["transform"]["prop"] = nlohmann::json::object(
                     {{"transforms",
-                      nlohmann::json::array({position_transform, convert_transform(scene, base_light->lightToWorld)})}});
+                      nlohmann::json::array({position_transform, convert_transform(base_light->lightToWorld)})}});
                 prop["light"] = light;
                 //                converted[luisa::format("Light:{}", light_index)] = light;
                 break;
@@ -727,21 +753,17 @@ static void convert_lights(const std::filesystem::path &base_dir,
                 auto infinite_light = static_cast<minipbrt::InfiniteLight *>(base_light);
                 auto env = nlohmann::json::object(
                     {{"type", "Environment"},
-                     {"impl", "Spherical"},
-                     {"prop",
-                      {{"scale",
-                        {infinite_light->scale[0],
-                         infinite_light->scale[1],
-                         infinite_light->scale[2]}}}}});
-                auto &e = (env["prop"]["emission"] = nlohmann::json::object());
+                     {"impl", "Spherical"}});
+                auto &prop = (env["prop"] = nlohmann::json::object());
+                auto &e = (prop["emission"] = nlohmann::json::object());
                 if (auto map = infinite_light->mapname) {
                     auto file = [&base_dir, map] {
                         try {
                             std::filesystem::path file{map};
                             if (!file.is_absolute()) { file = base_dir / file; }
                             return std::filesystem::canonical(file);
-                        } catch (const std::exception &e) {
-                            panic("Failed to resolve image file path: {}.", e.what());
+                        } catch (const std::exception &ex) {
+                            panic("Failed to resolve image file path: {}.", ex.what());
                         }
                     }();
                     auto copied_file = luisa::format("lr_exported_textures/env_{:05}_{}",
@@ -749,15 +771,28 @@ static void convert_lights(const std::filesystem::path &base_dir,
                     try {
                         std::filesystem::create_directories(base_dir / "lr_exported_textures");
                         std::filesystem::copy(file, base_dir / copied_file, std::filesystem::copy_options::update_existing);
-                    } catch (const std::exception &e) {
-                        panic("Failed to copy image file: {}.", e.what());
+                    } catch (const std::exception &ex) {
+                        panic("Failed to copy image file: {}.", ex.what());
                     }
                     e["impl"] = "Image";
                     e["prop"] = {{"file", copied_file}};
                 } else {
                     e["impl"] = "Constant";
-                    e["prop"] = {{"v", {infinite_light->L[0], infinite_light->L[1], infinite_light->L[2]}}};
+                    e["prop"] = {{"v",
+                                  {infinite_light->L[0],
+                                   infinite_light->L[1],
+                                   infinite_light->L[2]}}};
                 }
+                if (auto scale = base_light->scale;
+                    scale[0] == scale[1] && scale[1] == scale[2]) {
+                    prop["scale"] = {scale[0]};
+                } else {
+                    auto base_emission = std::move(e);
+                    prop["emission"] = {
+                        {"impl", "Scale"},
+                        {"prop", {{"base", std::move(base_emission)}, {"scale", {scale[0], scale[1], scale[2]}}}}};
+                }
+                prop["transform"] = convert_envmap_transform(base_light->lightToWorld);
                 auto name = luisa::format("EnvLight:{}", light_index);
                 converted[name] = env;
                 // TODO: use combine if existing
