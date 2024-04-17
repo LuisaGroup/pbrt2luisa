@@ -757,7 +757,8 @@ static void convert_scene(const std::filesystem::path &source_path,
                {{"impl", "MegaPath"},
                 {"prop",
                  {{"depth", 16},
-                  {"rr_depth", 5}}}}},
+                  {"rr_depth", 5},
+                  {"sampler", {{"impl", "ZSobol"}}}}}}},
               {"shapes", nlohmann::json::array()}}}};
         convert_textures(base_dir, scene, converted);
         convert_materials(base_dir, scene, converted);
