@@ -99,9 +99,10 @@ namespace luisa::render {
             m[i][j] = transform.start[j][i];
         }
     }
-    auto n = transpose(glm::inverse(glm::mat3(m))) *
-             glm::mat3(glm::rotate(glm::mat4(1.f), .5f * std::numbers::pi_v<float>, glm::vec3(0, 1, 0))) *
-                 glm::mat3(glm::scale(glm::mat4(1.f), glm::vec3(1, 1, 1)));
+    auto n = glm::mat3(m) *
+             glm::mat3(glm::rotate(glm::mat4(1.f), -.5f * std::numbers::pi_v<float>, glm::vec3(0, 0, 1))) *
+             glm::mat3(glm::scale(glm::mat4(1.f), glm::vec3(1, -1, 1))) *
+             glm::mat3(glm::rotate(glm::mat4(1.f), .5f * std::numbers::pi_v<float>, glm::vec3(1, 0, 0)));
     return {
         {"impl", "Matrix"},
         {"prop", {{"m", {n[0][0], n[1][0], n[2][0], 0, n[0][1], n[1][1], n[2][1], 0, n[0][2], n[1][2], n[2][2], 0, 0, 0, 0, 1}}}}};
@@ -654,7 +655,7 @@ static void convert_camera(const minipbrt::Scene *scene,
         }
         return "render.exr";
     }();
-    prop["spp"] = 1024;
+    prop["spp"] = 64;
     converted["render"]["cameras"] = nlohmann::json::array({camera});
 }
 
