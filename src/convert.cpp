@@ -463,7 +463,17 @@ static void convert_materials(const minipbrt::Scene *scene,
             }
 //            case minipbrt::MaterialType::Subsurface: break;
 //            case minipbrt::MaterialType::Translucent: break;
-            case minipbrt::MaterialType::Uber: break;
+            case minipbrt::MaterialType::Uber: {
+                auto uber_material = static_cast<minipbrt::UberMaterial*>(base_material);
+                material["impl"] = "Disney";
+                color_tex_parsing(scene, prop, "Kd", uber_material->Kd);
+                float_tex_parsing(scene, prop, "eta", uber_material->eta);
+                color_tex_parsing(scene, prop, "metallic", uber_material->Ks);
+                float_tex_parsing(scene, prop, "roughness", uber_material->uroughness);
+                color_tex_parsing(scene, prop, "alpha", uber_material->opacity);
+                color_tex_parsing(scene, prop, "specular_trans", uber_material->Kt);
+                break;
+            }
             default: eprintln("Ignored unsupported material at index {} with type '{}'.",
                               i, magic_enum::enum_name(material_type));
         }
