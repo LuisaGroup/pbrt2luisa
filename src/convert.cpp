@@ -444,10 +444,39 @@ static void float_tex_parsing(const minipbrt::Scene *scene,
                               const std::string &name,
                               const minipbrt::FloatTex &tex) {
     if (tex.texture == minipbrt::kInvalidIndex) {
-        prop[name] = nlohmann::json::object({{"type", "Texture"}, {"impl", "Constant"}, {"prop", {{"v", tex.value}}}});
+        prop[name] = nlohmann::json::object(
+            {{"type", "Texture"},
+             {"impl", "Constant"},
+             {"prop", {{"v", tex.value}}}});
     } else {
         prop[name] = "@" + texture_name(scene, tex.texture);
     }
+}
+
+static void concat_tex_parsing(const minipbrt::Scene *scene,
+                               nlohmann::json &prop,
+                               const std::string &name,
+                               const std::vector<const minipbrt::FloatTex *> &textures) {
+    auto channels = nlohmann::json::array();
+    for (auto tex : textures) {
+        auto temp = nlohmann::json::object({});
+        float_tex_parsing(scene, temp, "value", *tex);
+        channels.emplace_back(std::move(temp["value"]));
+    }
+    prop[name] = nlohmann::json::object(
+        {{"type", "Texture"},
+         {"impl", "Concat"},
+         {"prop", {{"channels", channels}}}});
+}
+
+static void metal_eta_k_parsing(const minipbrt::Scene *scene,
+                                nlohmann::json &prop,
+                                const std::string &name,
+                                const minipbrt::ColorTex &eta_tex,
+                                const minipbrt::ColorTex &k_tex) {
+    //    expect(eta_tex.texture != minipbrt::kInvalidIndex, "Invalid eta texture index.");
+    //    expect(k_tex.texture != minipbrt::kInvalidIndex, "Invalid k texture index.");
+    eprintln("Unsupported metal eta/k parsing.");
 }
 
 [[nodiscard]] static std::string convert_bump_to_normal(const std::filesystem::path &base_dir,
@@ -502,19 +531,19 @@ static void convert_materials(const std::filesystem::path &base_dir,
                 color_tex_parsing(scene, prop, "flatness", disney_material->flatness);
                 break;
             }
-                //            case minipbrt::MaterialType::Fourier: break;
             case minipbrt::MaterialType::Glass: {
                 auto glass_material = static_cast<minipbrt::GlassMaterial *>(base_material);
                 material["impl"] = "Glass";
                 color_tex_parsing(scene, prop, "Kr", glass_material->Kr);
                 color_tex_parsing(scene, prop, "Kt", glass_material->Kt);
                 float_tex_parsing(scene, prop, "eta", glass_material->eta);
-                float_tex_parsing(scene, prop, "roughness", glass_material->uroughness);
+                std::vector<const minipbrt::FloatTex *> roughness{
+                    &glass_material->uroughness,
+                    &glass_material->vroughness};
+                concat_tex_parsing(scene, prop, "roughness", roughness);
                 prop["remap_roughness"] = glass_material->remaproughness;
                 break;
             }
-                //            case minipbrt::MaterialType::Hair: break;
-                //            case minipbrt::MaterialType::KdSubsurface: break;
             case minipbrt::MaterialType::Matte: {
                 auto matte_material = static_cast<minipbrt::MatteMaterial *>(base_material);
                 material["impl"] = "Matte";
@@ -522,13 +551,22 @@ static void convert_materials(const std::filesystem::path &base_dir,
                 float_tex_parsing(scene, prop, "sigma", matte_material->sigma);
                 break;
             }
-                //            case minipbrt::MaterialType::Metal: {
-                //                //                auto metal_material = static_cast<minipbrt::MetalMaterial*>(base_material);
-                //                //                material["impl"] = "Metal";
-                //                //                color_tex_parsing(scene, prop, "Kr", metal_material->Kr);
-                //                //TODO check
-                //                break;
-                //            }
+            case minipbrt::MaterialType::Metal: {
+                // TODO
+                eprintln("Ignored unsupported material at index {} with type '{}'.",
+                         i, magic_enum::enum_name(material_type));
+                break;
+
+                auto metal_material = static_cast<minipbrt::MetalMaterial *>(base_material);
+                material["impl"] = "Metal";
+                std::vector<const minipbrt::FloatTex *> roughness{
+                    &metal_material->uroughness,
+                    &metal_material->vroughness};
+                concat_tex_parsing(scene, prop, "roughness", roughness);
+                metal_eta_k_parsing(scene, prop, "eta", metal_material->eta, metal_material->k);
+                prop["remap_roughness"] = metal_material->remaproughness;
+                break;
+            }
             case minipbrt::MaterialType::Mirror: {
                 auto mirror_material = static_cast<minipbrt::MirrorMaterial *>(base_material);
                 material["impl"] = "Mirror";
@@ -556,11 +594,13 @@ static void convert_materials(const std::filesystem::path &base_dir,
                 auto substrate_material = static_cast<minipbrt::SubstrateMaterial *>(base_material);
                 material["impl"] = "Plastic";
                 color_tex_parsing(scene, prop, "Kd", substrate_material->Kd);
-                float_tex_parsing(scene, prop, "roughness", substrate_material->uroughness);// TODO: uv roughness
+                std::vector<const minipbrt::FloatTex *> roughness{
+                    &substrate_material->uroughness,
+                    &substrate_material->vroughness};
+                concat_tex_parsing(scene, prop, "roughness", roughness);
                 prop["remap_roughness"] = substrate_material->remaproughness;
                 break;
             }
-                //            case minipbrt::MaterialType::Subsurface: break;
             case minipbrt::MaterialType::Translucent: {
                 auto translucent_material = static_cast<minipbrt::TranslucentMaterial *>(base_material);
                 material["impl"] = "Disney";
@@ -577,12 +617,24 @@ static void convert_materials(const std::filesystem::path &base_dir,
                 color_tex_parsing(scene, prop, "Kd", uber_material->Kd);
                 float_tex_parsing(scene, prop, "eta", uber_material->eta);
                 //                color_tex_parsing(scene, prop, "metallic", uber_material->Ks);
-                float_tex_parsing(scene, prop, "roughness", uber_material->uroughness);
+                std::vector<const minipbrt::FloatTex *> roughness{
+                    &uber_material->uroughness,
+                    &uber_material->vroughness};
+                concat_tex_parsing(scene, prop, "roughness", roughness);
                 color_tex_parsing(scene, prop, "alpha", uber_material->opacity);
                 color_tex_parsing(scene, prop, "specular_trans", uber_material->Kt);
                 prop["remap_roughness"] = uber_material->remaproughness;
                 break;
             }
+                //            case minipbrt::MaterialType::Subsurface:
+                //            case minipbrt::MaterialType::Fourier:
+                //            case minipbrt::MaterialType::Hair:
+                //            case minipbrt::MaterialType::KdSubsurface: {
+                //                // TODO
+                //                eprintln("Ignored unsupported material at index {} with type '{}'.",
+                //                         i, magic_enum::enum_name(material_type));
+                //                break;
+                //            }
             default: eprintln("Ignored unsupported material at index {} with type '{}'.",
                               i, magic_enum::enum_name(material_type));
         }

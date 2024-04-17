@@ -7,4 +7,5 @@ int main(int argc, char *argv[]) {
     } else {
         luisa::render::convert(argv[1]);
     }
+    return 0;
 }
