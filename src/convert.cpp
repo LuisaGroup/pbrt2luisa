@@ -230,7 +230,7 @@ static void convert_shapes(
                                 {"type", "Surface"},
                                 {"impl", "Matte"},
                                 {"prop",
-                                    {{"alpha", luisa::format("@{}", alpha_texture_name)}}}};
+                                 {{"alpha", luisa::format("@{}", alpha_texture_name)}}}};
                         }
                         prop["surface"] = luisa::format("@{}", alpha_surface_name);
                     } else {
@@ -472,13 +472,13 @@ static void convert_materials(const minipbrt::Scene *scene,
                 float_tex_parsing(scene, prop, "sigma", matte_material->sigma);
                 break;
             }
-            case minipbrt::MaterialType::Metal: {
-                //                auto metal_material = static_cast<minipbrt::MetalMaterial*>(base_material);
-                //                material["impl"] = "Metal";
-                //                color_tex_parsing(scene, prop, "Kr", metal_material->Kr);
-                //TODO check
-                break;
-            }
+//            case minipbrt::MaterialType::Metal: {
+//                //                auto metal_material = static_cast<minipbrt::MetalMaterial*>(base_material);
+//                //                material["impl"] = "Metal";
+//                //                color_tex_parsing(scene, prop, "Kr", metal_material->Kr);
+//                //TODO check
+//                break;
+//            }
             case minipbrt::MaterialType::Mirror: {
                 auto mirror_material = static_cast<minipbrt::MirrorMaterial *>(base_material);
                 material["impl"] = "Mirror";
@@ -486,10 +486,10 @@ static void convert_materials(const minipbrt::Scene *scene,
                 break;
             }
             case minipbrt::MaterialType::Mix: {
-                auto mix_material = static_cast<minipbrt::MixMaterial*>(base_material);
+                auto mix_material = static_cast<minipbrt::MixMaterial *>(base_material);
                 material["impl"] = "Mix";
-                prop["a"] = "@" + texture_name(scene, mix_material->namedmaterial1);
-                prop["b"] = "@" + texture_name(scene, mix_material->namedmaterial2);
+                prop["a"] = "@" + material_name(scene, mix_material->namedmaterial1);
+                prop["b"] = "@" + material_name(scene, mix_material->namedmaterial2);
                 color_tex_parsing(scene, prop, "ratio", mix_material->amount);
                 break;
             }
@@ -511,7 +511,13 @@ static void convert_materials(const minipbrt::Scene *scene,
                 break;
             }
                 //            case minipbrt::MaterialType::Subsurface: break;
-                //            case minipbrt::MaterialType::Translucent: break;
+            case minipbrt::MaterialType::Translucent: {
+                auto translucent_material = static_cast<minipbrt::TranslucentMaterial *>(base_material);
+                material["impl"] = "Plastic";
+                color_tex_parsing(scene, prop, "Kd", translucent_material->Kd);
+                float_tex_parsing(scene, prop, "roughness", translucent_material->roughness);
+                break;
+            }
             case minipbrt::MaterialType::Uber: {
                 auto uber_material = static_cast<minipbrt::UberMaterial *>(base_material);
                 material["impl"] = "Disney";
