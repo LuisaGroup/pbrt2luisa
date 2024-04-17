@@ -400,21 +400,24 @@ static void color_tex_parsing(
     const std::string &name,
     const minipbrt::ColorTex &tex) {
     if (tex.texture == minipbrt::kInvalidIndex) {
-        prop[name] = nlohmann::json::object({{"type", "Texture"}, {"impl", "Constant"}, {"prop", {{"v", {
-                                                                                                            tex.value[0],
-                                                                                                            tex.value[1],
-                                                                                                            tex.value[2],
-                                                                                                        }}}}});
+        prop[name] = nlohmann::json::object(
+            {{"type", "Texture"},
+             {"impl", "Constant"},
+             {"prop",
+              {{"v", {
+                         tex.value[0],
+                         tex.value[1],
+                         tex.value[2],
+                     }}}}});
     } else {
         prop[name] = "@" + texture_name(scene, tex.texture);
     }
 }
 
-static void float_tex_parsing(
-    const minipbrt::Scene *scene,
-    nlohmann::json &prop,
-    const std::string &name,
-    const minipbrt::FloatTex &tex) {
+static void float_tex_parsing(const minipbrt::Scene *scene,
+                              nlohmann::json &prop,
+                              const std::string &name,
+                              const minipbrt::FloatTex &tex) {
     if (tex.texture == minipbrt::kInvalidIndex) {
         prop[name] = nlohmann::json::object({{"type", "Texture"}, {"impl", "Constant"}, {"prop", {{"v", tex.value}}}});
     } else {
@@ -422,17 +425,35 @@ static void float_tex_parsing(
     }
 }
 
-static void convert_materials(const minipbrt::Scene *scene,
+[[nodiscard]] static std::string convert_bump_to_normal(const std::filesystem::path &base_dir,
+                                                        const minipbrt::Scene *scene,
+                                                        uint32_t bump_map_index,
+                                                        nlohmann::json &converted) noexcept {
+    auto base_texture_name = texture_name(scene, bump_map_index);
+    auto base_texture = scene->textures[bump_map_index];
+    expect(base_texture->type() == minipbrt::TextureType::ImageMap,
+           "Unsupported bump map at index {} with type '{}'.",
+           bump_map_index, magic_enum::enum_name(base_texture->type()));
+    return {};
+}
+
+static void convert_materials(const std::filesystem::path &base_dir,
+                              const minipbrt::Scene *scene,
                               nlohmann::json &converted) noexcept {
     for (auto i = 0u; i < scene->materials.size(); i++) {
         auto base_material = scene->materials[i];
-        if (base_material->bumpmap != minipbrt::kInvalidIndex) {
-            eprintln("Ignored unsupported material bump map at index {}.", i);
-        }
         auto material = nlohmann::json::object();
         material["type"] = "Surface";
-        auto &prop = (material["prop"] = nlohmann::json::object());
         material["impl"] = "Matte";
+        auto &prop = (material["prop"] = nlohmann::json::object());
+        if (auto b = base_material->bumpmap; b != minipbrt::kInvalidIndex) {
+            if (auto normal_texture_name = convert_bump_to_normal(base_dir, scene, b, converted);
+                !normal_texture_name.empty()) {
+                prop["normal_map"] = luisa::format("@{}", normal_texture_name);
+            } else {
+                eprintln("Ignored unsupported bump map at index {}.", i);
+            }
+        }
         // TODO
         switch (auto material_type = base_material->type()) {
             case minipbrt::MaterialType::Disney: {
@@ -626,14 +647,25 @@ static void convert_lights(const std::filesystem::path &base_dir,
                                                                  })}});
 
                 // shape
-                auto light_shape = nlohmann::json::object({{"type", "Shape"}, {"impl", "Sphere"}});
+                auto light_shape = nlohmann::json::object(
+                    {{"type", "Shape"},
+                     {"impl", "Sphere"},
+                     {"prop", {{"visible", false}}}});
                 auto &prop = (light_shape["prop"] = nlohmann::json::object());
                 // transform
-                auto position_transform = nlohmann::json::object({{"type", "transform"}, {"impl", "SRT"}, {"prop", nlohmann::json::object({{"translate", nlohmann::json::array({point_light->from[0], point_light->from[1], point_light->from[2]})}})}});
+                auto position_transform = nlohmann::json::object(
+                    {{"type", "transform"},
+                     {"impl", "SRT"},
+                     {"prop",
+                      {{"translate",
+                        nlohmann::json::array({point_light->from[0],
+                                               point_light->from[1],
+                                               point_light->from[2]})}}}});
 
                 prop["transform"] = nlohmann::json::object({{"type", "transform"}, {"impl", "Stack"}});
-                prop["transform"]["prop"] = nlohmann::json::object({{"transforms", nlohmann::json::array({position_transform,
-                                                                                                          convert_transform(scene, base_light->lightToWorld)})}});
+                prop["transform"]["prop"] = nlohmann::json::object(
+                    {{"transforms",
+                      nlohmann::json::array({position_transform, convert_transform(scene, base_light->lightToWorld)})}});
                 prop["light"] = light;
                 //                converted[luisa::format("Light:{}", light_index)] = light;
                 break;
@@ -699,7 +731,7 @@ static void convert_scene(const std::filesystem::path &source_path,
                   {"rr_depth", 5}}}}},
               {"shapes", nlohmann::json::array()}}}};
         convert_textures(base_dir, scene, converted);
-        convert_materials(scene, converted);
+        convert_materials(base_dir, scene, converted);
         convert_area_lights(scene, converted);
         convert_shapes(base_dir, scene, converted);
         convert_lights(base_dir, scene, converted);
