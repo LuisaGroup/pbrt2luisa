@@ -540,9 +540,11 @@ static void convert_materials(const std::filesystem::path &base_dir,
                 //            case minipbrt::MaterialType::Subsurface: break;
             case minipbrt::MaterialType::Translucent: {
                 auto translucent_material = static_cast<minipbrt::TranslucentMaterial *>(base_material);
-                material["impl"] = "Plastic";
+                material["impl"] = "Disney";
                 color_tex_parsing(scene, prop, "Kd", translucent_material->Kd);
+                color_tex_parsing(scene, prop, "specular_trans", translucent_material->Ks);
                 float_tex_parsing(scene, prop, "roughness", translucent_material->roughness);
+                prop["thin"] = true;
                 break;
             }
             case minipbrt::MaterialType::Uber: {
@@ -550,7 +552,7 @@ static void convert_materials(const std::filesystem::path &base_dir,
                 material["impl"] = "Disney";
                 color_tex_parsing(scene, prop, "Kd", uber_material->Kd);
                 float_tex_parsing(scene, prop, "eta", uber_material->eta);
-                color_tex_parsing(scene, prop, "metallic", uber_material->Ks);
+//                color_tex_parsing(scene, prop, "metallic", uber_material->Ks);
                 float_tex_parsing(scene, prop, "roughness", uber_material->uroughness);
                 color_tex_parsing(scene, prop, "alpha", uber_material->opacity);
                 color_tex_parsing(scene, prop, "specular_trans", uber_material->Kt);
