@@ -255,39 +255,45 @@ static void convert_shapes(
             prop["transform"] = std::move(t);
         }
         auto &shapes = (prop["shapes"] = nlohmann::json::array());
-        expect(base_object->firstShape != minipbrt::kInvalidIndex &&
-                   base_object->numShapes != 0u,
-               "Invalid first shape index.");
-        for (auto s = 0u; s < base_object->numShapes; s++) {
-            shapes.emplace_back(luisa::format("@Shape:{}", base_object->firstShape + s));
+        if (base_object->firstShape == minipbrt::kInvalidIndex) {
+            expect(base_object->numShapes == 0u, "Invalid number of shapes.");
+            eprintln("Ignored empty object at index {}.", object_index);
+        } else {
+            for (auto s = 0u; s < base_object->numShapes; s++) {
+                shapes.emplace_back(luisa::format("@Shape:{}", base_object->firstShape + s));
+            }
+            converted[luisa::format("Object:{}", object_index)] = object;
         }
-        converted[luisa::format("Object:{}", object_index)] = object;
     }
     // process instances
     for (auto instance_index = 0u; instance_index < scene->instances.size(); instance_index++) {
         auto base_instance = scene->instances[instance_index];
-        if (base_instance->insideMedium != minipbrt::kInvalidIndex ||
-            base_instance->outsideMedium != minipbrt::kInvalidIndex) {
-            eprintln("Ignored unsupported instance inside medium at index {}.", instance_index);
+        if (auto o = base_instance->object;
+            o == minipbrt::kInvalidIndex || scene->objects[o]->firstShape == minipbrt::kInvalidIndex) {
+            eprintln("Ignored instance at index {} with invalid object index.", instance_index);
+        } else {
+            if (base_instance->insideMedium != minipbrt::kInvalidIndex ||
+                base_instance->outsideMedium != minipbrt::kInvalidIndex) {
+                eprintln("Ignored unsupported instance inside medium at index {}.", instance_index);
+            }
+            if (base_instance->reverseOrientation) {
+                eprintln("Ignored unsupported instance reverse orientation at index {}.", instance_index);
+            }
+            auto instance = nlohmann::json::object();
+            instance["type"] = "Shape";
+            instance["impl"] = "Instance";
+            auto &prop = (instance["prop"] = nlohmann::json::object());
+            // transform
+            if (auto t = convert_transform(scene, base_instance->instanceToWorld); !t.is_null()) {
+                prop["transform"] = std::move(t);
+            }
+            if (auto l = base_instance->areaLight; l != minipbrt::kInvalidIndex) {
+                prop["light"] = luisa::format("@AreaLight:{}", l);
+            }
+            prop["shape"] = luisa::format("@Object:{}", o);
+            converted[luisa::format("Instance:{}", instance_index)] = instance;
+            converted["render"]["shapes"].emplace_back(luisa::format("@Instance:{}", instance_index));
         }
-        if (base_instance->reverseOrientation) {
-            eprintln("Ignored unsupported instance reverse orientation at index {}.", instance_index);
-        }
-        auto instance = nlohmann::json::object();
-        instance["type"] = "Shape";
-        instance["impl"] = "Instance";
-        auto &prop = (instance["prop"] = nlohmann::json::object());
-        // transform
-        if (auto t = convert_transform(scene, base_instance->instanceToWorld); !t.is_null()) {
-            prop["transform"] = std::move(t);
-        }
-        if (auto l = base_instance->areaLight; l != minipbrt::kInvalidIndex) {
-            prop["light"] = luisa::format("@AreaLight:{}", l);
-        }
-        expect(base_instance->object != minipbrt::kInvalidIndex, "Invalid object index.");
-        prop["shape"] = luisa::format("@Object:{}", base_instance->object);
-        converted[luisa::format("Instance:{}", instance_index)] = instance;
-        converted["render"]["shapes"].emplace_back(luisa::format("@Instance:{}", instance_index));
     }
 }
 
@@ -323,24 +329,53 @@ static void convert_textures(const std::filesystem::path &base_dir,
         nlohmann::json texture;
         texture["type"] = "Texture";
         auto &prop = (texture["prop"] = nlohmann::json::object());
-        // TODO
         texture["impl"] = "Constant";
         prop["v"] = {1.f, 1.f, 1.f, 1.f};
         switch (base_texture->type()) {
-            case minipbrt::TextureType::Bilerp: break;
-            case minipbrt::TextureType::Checkerboard2D: break;
-            case minipbrt::TextureType::Checkerboard3D: break;
-            case minipbrt::TextureType::Constant: break;
-            case minipbrt::TextureType::Dots: break;
-            case minipbrt::TextureType::FBM: break;
-            case minipbrt::TextureType::ImageMap: break;
-            case minipbrt::TextureType::Marble: break;
-            case minipbrt::TextureType::Mix: break;
-            case minipbrt::TextureType::Scale: break;
-            case minipbrt::TextureType::UV: break;
-            case minipbrt::TextureType::Windy: break;
-            case minipbrt::TextureType::Wrinkled: break;
-            case minipbrt::TextureType::PTex: break;
+            case minipbrt::TextureType::Constant: {
+                auto c = static_cast<const minipbrt::ConstantTexture *>(base_texture);
+                texture["impl"] = "Constant";
+                prop["v"] = {c->value[0], c->value[1], c->value[2]};
+                break;
+            }
+            case minipbrt::TextureType::ImageMap: {
+                auto image = static_cast<const minipbrt::ImageMapTexture *>(base_texture);
+                texture["impl"] = "Image";
+                if (auto mapping = image->mapping; mapping == minipbrt::TexCoordMapping::UV) {
+                    prop["uv_scale"] = {image->uscale, image->vscale};
+                    prop["uv_offset"] = {image->udelta, image->vdelta};
+                } else {
+                    eprintln("Ignored unsupported texture mapping at index {} with type '{}'.",
+                             texture_index, magic_enum::enum_name(mapping));
+                }
+                prop["scale"] = image->scale;
+                expect(image->filename != nullptr, "Image filename is null.");
+                auto file = [&base_dir, image] {
+                    try {
+                        std::filesystem::path file{image->filename};
+                        if (!file.is_absolute()) { file = base_dir / file; }
+                        return std::filesystem::canonical(file);
+                    } catch (const std::exception &e) {
+                        panic("Failed to resolve image file path: {}.", e.what());
+                    }
+                }();
+                auto copied_file = luisa::format("lr_exported_textures/{:05}_{}", texture_index, file.filename().string());
+                try {
+                    std::filesystem::create_directories(base_dir / "lr_exported_textures");
+                    std::filesystem::copy(file, base_dir / copied_file, std::filesystem::copy_options::update_existing);
+                } catch (const std::exception &e) {
+                    panic("Failed to copy image file: {}.", e.what());
+                }
+                prop["file"] = copied_file;
+                if (gamma) { prop["encoding"] = "sRGB"; }
+                break;
+            }
+            default: {
+                eprintln("Ignored unsupported texture at index {} with "
+                         "type '{}'. Falling back to constant.",
+                         texture_index, magic_enum::enum_name(base_texture->type()));
+                break;
+            }
         }
         converted[texture_name(scene, texture_index)] = texture;
     }
@@ -473,9 +508,41 @@ static void convert_lights(
             }
             case minipbrt::LightType::Infinite: {
                 auto infinite_light = static_cast<minipbrt::InfiniteLight *>(base_light);
-                auto env = nlohmann::json::object({{"type", "Environment"}, {"impl", "Spherical"}, {"prop", {{"emission", {{"type", "Texture"}, {"impl", "Image"}, {"prop", {{"file", infinite_light->mapname}}}}}}}});
+                auto env = nlohmann::json::object(
+                    {{"type", "Environment"},
+                     {"impl", "Spherical"},
+                     {"prop",
+                      {{"scale",
+                        {infinite_light->scale[0],
+                         infinite_light->scale[1],
+                         infinite_light->scale[2]}}}}});
+                auto &e = (env["prop"]["emission"] = nlohmann::json::object());
+                if (auto map = infinite_light->mapname) {
+                    auto file = [&base_dir, map] {
+                        try {
+                            std::filesystem::path file{map};
+                            if (!file.is_absolute()) { file = base_dir / file; }
+                            return std::filesystem::canonical(file);
+                        } catch (const std::exception &e) {
+                            panic("Failed to resolve image file path: {}.", e.what());
+                        }
+                    }();
+                    auto copied_file = luisa::format("lr_exported_textures/env_{:05}_{}", light_index, file.filename().string());
+                    try {
+                        std::filesystem::create_directories(base_dir / "lr_exported_textures");
+                        std::filesystem::copy(file, base_dir / copied_file, std::filesystem::copy_options::update_existing);
+                    } catch (const std::exception &e) {
+                        panic("Failed to copy image file: {}.", e.what());
+                    }
+                    e["impl"] = "Image";
+                    e["prop"] = {{"file", copied_file}};
+                } else {
+                    e["impl"] = "Constant";
+                    e["prop"] = {{"v", {infinite_light->L[0], infinite_light->L[1], infinite_light->L[2]}}};
+                }
                 auto name = luisa::format("EnvLight:{}", light_index);
                 converted[name] = env;
+                // TODO: use combine if existing
                 converted["render"]["environment"] = "@" + name;
                 break;
             }
@@ -494,7 +561,7 @@ static void convert_scene(const std::filesystem::path &source_path,
         nlohmann::json converted{
             {"render",
              {{"integrator",
-               {{"impl", "Normal"},
+               {{"impl", "MegaPath"},
                 {"prop",
                  {{"depth", 16},
                   {"rr_depth", 5}}}}},
