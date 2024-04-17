@@ -422,10 +422,29 @@ static void float_tex_parsing(const minipbrt::Scene *scene,
                               const std::string &name,
                               const minipbrt::FloatTex &tex) {
     if (tex.texture == minipbrt::kInvalidIndex) {
-        prop[name] = nlohmann::json::object({{"type", "Texture"}, {"impl", "Constant"}, {"prop", {{"v", tex.value}}}});
+        prop[name] = nlohmann::json::object(
+            {{"type", "Texture"},
+             {"impl", "Constant"},
+             {"prop", {{"v", tex.value}}}});
     } else {
         prop[name] = "@" + texture_name(scene, tex.texture);
     }
+}
+
+static void concat_tex_parsing(const minipbrt::Scene *scene,
+                               nlohmann::json &prop,
+                               const std::string &name,
+                               const std::vector<const minipbrt::FloatTex *> &textures) {
+    auto channels = nlohmann::json::array();
+    for (auto tex : textures) {
+        auto temp = nlohmann::json::object({});
+        float_tex_parsing(scene, temp, "value", *tex);
+        channels.emplace_back(std::move(temp["value"]));
+    }
+    prop[name] = nlohmann::json::object(
+        {{"type", "Texture"},
+         {"impl", "Concat"},
+         {"prop", {{"channels", channels}}}});
 }
 
 [[nodiscard]] static std::string convert_bump_to_normal(const std::filesystem::path &base_dir,
@@ -499,13 +518,18 @@ static void convert_materials(const std::filesystem::path &base_dir,
                 float_tex_parsing(scene, prop, "sigma", matte_material->sigma);
                 break;
             }
-                //            case minipbrt::MaterialType::Metal: {
-                //                //                auto metal_material = static_cast<minipbrt::MetalMaterial*>(base_material);
-                //                //                material["impl"] = "Metal";
-                //                //                color_tex_parsing(scene, prop, "Kr", metal_material->Kr);
-                //                //TODO check
-                //                break;
-                //            }
+            case minipbrt::MaterialType::Metal: {
+                auto metal_material = static_cast<minipbrt::MetalMaterial *>(base_material);
+                material["impl"] = "Metal";
+                std::vector<const minipbrt::FloatTex *> roughness{
+                    &metal_material->uroughness,
+                    &metal_material->vroughness};
+                concat_tex_parsing(scene, prop, "roughness", roughness);
+                color_tex_parsing(scene, prop, "eta", metal_material->eta);
+                color_tex_parsing(scene, prop, "Kd", metal_material->k);
+                prop["remap_roughness"] = metal_material->remaproughness;
+                break;
+            }
             case minipbrt::MaterialType::Mirror: {
                 auto mirror_material = static_cast<minipbrt::MirrorMaterial *>(base_material);
                 material["impl"] = "Mirror";
