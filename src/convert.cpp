@@ -689,6 +689,10 @@ static void convert_lights(const std::filesystem::path &base_dir,
     std::vector<std::string> env_array;
     for (auto light_index = 0u; light_index < scene->lights.size(); light_index++) {
         auto base_light = scene->lights[light_index];
+        if (base_light->scale[0] <= 0.f && base_light->scale[1] <= 0.f && base_light->scale[2] <= 0.f) {
+            eprintln("Ignored light at index {} with invalid scale.", light_index);
+            continue;
+        }
         auto light = nlohmann::json::object({{"type", "Light"}, {"impl", "Diffuse"}, {"prop", nlohmann::json::object()}});
         auto &emission = light["emission"];
         emission["type"] = "Texture";
@@ -729,32 +733,50 @@ static void convert_lights(const std::filesystem::path &base_dir,
             }
             case minipbrt::LightType::Distant: {
                 auto distant_light = static_cast<minipbrt::DistantLight *>(base_light);
-                auto env = nlohmann::json::object(
-                    {{"type", "Environment"},
-                     {"impl", "Directional"}});
-                auto &prop = (env["prop"] = nlohmann::json::object());
-                auto &e = (prop["emission"] = nlohmann::json::object({
-                               {"type", "Texture"}, {"impl", "Constant"},
-                               {"prop", { {"v", {distant_light->L[0], distant_light->L[1], distant_light->L[2]}} }}
-                           }));
-                prop["direction"] = nlohmann::json::array({
-                    distant_light->to[0] - distant_light->from[0],
-                    distant_light->to[1] - distant_light->from[1],
-                    distant_light->to[2] - distant_light->from[2]
-                });
-                if (auto scale = base_light->scale;
-                    scale[0] == scale[1] && scale[1] == scale[2]) {
-                    prop["scale"] = {scale[0]};
-                } else {
-                    auto base_emission = std::move(e);
-                    prop["emission"] = {
-                        {"impl", "Scale"},
-                        {"prop", {{"base", std::move(base_emission)}, {"scale", {scale[0], scale[1], scale[2]}}}}};
+                if (auto L = distant_light->L; !(L[0] <= 0.f && L[1] <= 0.f && L[2] <= 0.f)) {
+                    auto env = nlohmann::json::object(
+                        {{"type", "Environment"},
+                         {"impl", "Directional"}});
+                    auto &prop = (env["prop"] = nlohmann::json::object());
+                    prop["visible"] = false;
+                    prop["normalize"] = true;
+                    auto s = std::numbers::inv_pi / 4.;
+                    auto &e = (prop["emission"] = nlohmann::json::object(
+                                   {{"type", "Texture"},
+                                    {"impl", "Constant"},
+                                    {"prop", {{"v", {L[0] * s, L[1] * s, L[2] * s}}}}}));
+                    glm::mat4 m;
+                    for (auto i = 0; i < 4; i++) {
+                        for (auto j = 0; j < 4; j++) {
+                            m[i][j] = distant_light->lightToWorld.start[j][i];
+                        }
+                    }
+                    println("Distant light matrix: (({}, {}, {}, {}), ({}, {}, {}, {}), ({}, {}, {}, {}), ({}, {}, {}, {})).",
+                            m[0][0], m[0][1], m[0][2], m[0][3],
+                            m[1][0], m[1][1], m[1][2], m[1][3],
+                            m[2][0], m[2][1], m[2][2], m[2][3],
+                            m[3][0], m[3][1], m[3][2], m[3][3]);
+                    auto d = glm::vec3(m * glm::vec4(distant_light->to[0], distant_light->to[1], distant_light->to[2], 1.f)) -
+                             glm::vec3(m * glm::vec4(distant_light->from[0], distant_light->from[1], distant_light->from[2], 1.f));
+                    auto dd =//glm::mat3(glm::rotate(glm::mat4(1.f), -.5f * std::numbers::pi_v<float>, glm::vec3(0, 0, 1))) *
+                        //glm::mat3(glm::scale(glm::mat4(1.f), glm::vec3(1, -1, 1))) *
+                        //glm::mat3(glm::rotate(glm::mat4(1.f), .5f * std::numbers::pi_v<float>, glm::vec3(1, 0, 0))) *
+                        glm::normalize(d);
+                    prop["direction"] = nlohmann::json::array({-dd.x, -dd.y, dd.z});
+                    luisa::println("Directional light direction: ({}, {}, {}).", -dd.x, -dd.y, dd.z);
+                    if (auto scale = base_light->scale;
+                        scale[0] == scale[1] && scale[1] == scale[2]) {
+                        prop["scale"] = scale[0];
+                    } else {
+                        auto base_emission = std::move(e);
+                        prop["emission"] = {
+                            {"impl", "Scale"},
+                            {"prop", {{"base", std::move(base_emission)}, {"scale", {scale[0], scale[1], scale[2]}}}}};
+                    }
+                    auto name = luisa::format("Env:{}:Directional", light_index);
+                    converted[name] = env;
+                    env_array.emplace_back("@" + name);
                 }
-                auto name = luisa::format("Env:{}:Directional", light_index);
-                prop["transform"] = convert_envmap_transform(base_light->lightToWorld);
-                converted[name] = env;
-                env_array.emplace_back("@" + name);
                 break;
             }
             case minipbrt::LightType::Infinite: {
@@ -793,7 +815,7 @@ static void convert_lights(const std::filesystem::path &base_dir,
                 }
                 if (auto scale = base_light->scale;
                     scale[0] == scale[1] && scale[1] == scale[2]) {
-                    prop["scale"] = {scale[0]};
+                    prop["scale"] = scale[0];
                 } else {
                     auto base_emission = std::move(e);
                     prop["emission"] = {
@@ -810,10 +832,8 @@ static void convert_lights(const std::filesystem::path &base_dir,
                               light_index, magic_enum::enum_name(light_type));
         }
     }
-    converted["render"]["environment"] = nlohmann::json::object({
-        {"type", "Environment"}, {"impl", "Grouped"}, {"prop", { {"environments", nlohmann::json::array()} }}
-    });
-    for(auto &item: env_array) {
+    converted["render"]["environment"] = nlohmann::json::object({{"type", "Environment"}, {"impl", "Grouped"}, {"prop", {{"environments", nlohmann::json::array()}}}});
+    for (auto &item : env_array) {
         converted["render"]["environment"]["prop"]["environments"].emplace_back(item);
     }
 }
