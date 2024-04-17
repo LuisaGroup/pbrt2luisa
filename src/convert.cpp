@@ -4,6 +4,7 @@
 
 #include <fstream>
 #include <filesystem>
+#include <numbers>
 
 #include <nlohmann/json.hpp>
 #include <magic_enum/magic_enum.hpp>
