@@ -472,13 +472,13 @@ static void convert_materials(const minipbrt::Scene *scene,
                 float_tex_parsing(scene, prop, "sigma", matte_material->sigma);
                 break;
             }
-//            case minipbrt::MaterialType::Metal: {
-//                //                auto metal_material = static_cast<minipbrt::MetalMaterial*>(base_material);
-//                //                material["impl"] = "Metal";
-//                //                color_tex_parsing(scene, prop, "Kr", metal_material->Kr);
-//                //TODO check
-//                break;
-//            }
+                //            case minipbrt::MaterialType::Metal: {
+                //                //                auto metal_material = static_cast<minipbrt::MetalMaterial*>(base_material);
+                //                //                material["impl"] = "Metal";
+                //                //                color_tex_parsing(scene, prop, "Kr", metal_material->Kr);
+                //                //TODO check
+                //                break;
+                //            }
             case minipbrt::MaterialType::Mirror: {
                 auto mirror_material = static_cast<minipbrt::MirrorMaterial *>(base_material);
                 material["impl"] = "Mirror";
@@ -571,9 +571,9 @@ static void convert_camera(const minipbrt::Scene *scene,
         prop["focus_distance"] = focus_distance;
     } else {
         camera["impl"] = "Pinhole";
+        prop["fov"] = perspective->fov;
     }
     prop["transform"] = convert_camera_transform(scene, perspective->cameraToWorld);
-    prop["fov"] = perspective->fov;
     prop["film"] = convert_film(scene, converted);
     prop["file"] = "render.exr";
     prop["spp"] = 1024;
