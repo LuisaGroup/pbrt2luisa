@@ -443,7 +443,14 @@ static void convert_materials(const minipbrt::Scene *scene,
                 color_tex_parsing(scene, prop, "Kr", mirror_material->Kr);
                 break;
             }
-//            case minipbrt::MaterialType::Mix: break;
+            case minipbrt::MaterialType::Mix: {
+                auto mix_material = static_cast<minipbrt::MixMaterial*>(base_material);
+                material["impl"] = "Mix";
+                prop["a"] = "@" + texture_name(scene, mix_material->namedmaterial1);
+                prop["b"] = "@" + texture_name(scene, mix_material->namedmaterial2);
+                color_tex_parsing(scene, prop, "ratio", mix_material->amount);
+                break;
+            }
             case minipbrt::MaterialType::None: break;
             case minipbrt::MaterialType::Plastic: {
                 auto plastic_material = static_cast<minipbrt::PlasticMaterial*>(base_material);
