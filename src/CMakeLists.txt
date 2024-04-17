@@ -10,5 +10,5 @@ target_link_libraries(pbrt2luisa PRIVATE
         minipbrt-object
         nlohmann-json
         magic_enum
-        glm::glm-header-only)
-
+        glm::glm-header-only
+        fmt::fmt-header-only)

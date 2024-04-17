@@ -99,24 +99,24 @@ static void dump_mesh_to_wavefront_obj(
     std::ofstream f{file_name};
     f << "# Converted from PLY mesh\n";
     for (auto v = 0u; v < mesh->num_vertices; v++) {
-        f << std::format("v {} {} {}\n",
-                         mesh->P[v * 3 + 0],
-                         mesh->P[v * 3 + 1],
-                         mesh->P[v * 3 + 2]);
+        f << luisa::format("v {} {} {}\n",
+                           mesh->P[v * 3 + 0],
+                           mesh->P[v * 3 + 1],
+                           mesh->P[v * 3 + 2]);
     }
     if (mesh->N) {
         for (auto v = 0u; v < mesh->num_vertices; v++) {
-            f << std::format("vn {} {} {}\n",
-                             mesh->N[v * 3 + 0],
-                             mesh->N[v * 3 + 1],
-                             mesh->N[v * 3 + 2]);
+            f << luisa::format("vn {} {} {}\n",
+                               mesh->N[v * 3 + 0],
+                               mesh->N[v * 3 + 1],
+                               mesh->N[v * 3 + 2]);
         }
     }
     if (mesh->uv) {
         for (auto v = 0u; v < mesh->num_vertices; v++) {
-            f << std::format("vt {} {}\n",
-                             mesh->uv[v * 2 + 0],
-                             mesh->uv[v * 2 + 1]);
+            f << luisa::format("vt {} {}\n",
+                               mesh->uv[v * 2 + 0],
+                               mesh->uv[v * 2 + 1]);
         }
     }
     expect(mesh->indices, "Mesh indices are null.");
@@ -125,29 +125,29 @@ static void dump_mesh_to_wavefront_obj(
         if (mesh->N) {
             if (mesh->uv) {
                 return [](std::ofstream &f, int i0, int i1, int i2) {
-                    f << std::format("f {}/{}/{} {}/{}/{} {}/{}/{}\n",
-                                     i0, i0, i0,
-                                     i1, i1, i1,
-                                     i2, i2, i2);
+                    f << luisa::format("f {}/{}/{} {}/{}/{} {}/{}/{}\n",
+                                       i0, i0, i0,
+                                       i1, i1, i1,
+                                       i2, i2, i2);
                 };
             }
             return [](std::ofstream &f, int i0, int i1, int i2) {
-                f << std::format("f {}//{} {}//{} {}//{}\n",
-                                 i0, i0,
-                                 i1, i1,
-                                 i2, i2);
+                f << luisa::format("f {}//{} {}//{} {}//{}\n",
+                                   i0, i0,
+                                   i1, i1,
+                                   i2, i2);
             };
         }
         if (mesh->uv) {
             return [](std::ofstream &f, int i0, int i1, int i2) {
-                f << std::format("f {}/{} {}/{} {}/{}\n",
-                                 i0, i0,
-                                 i1, i1,
-                                 i2, i2);
+                f << luisa::format("f {}/{} {}/{} {}/{}\n",
+                                   i0, i0,
+                                   i1, i1,
+                                   i2, i2);
             };
         }
         return [](std::ofstream &f, int i0, int i1, int i2) {
-            f << std::format("f {} {} {}\n", i0, i1, i2);
+            f << luisa::format("f {} {} {}\n", i0, i1, i2);
         };
     }();
     for (auto i = 0u; i < mesh->num_indices; i += 3) {
@@ -161,13 +161,13 @@ static void dump_mesh_to_wavefront_obj(
 [[nodiscard]] static std::string material_name(const minipbrt::Scene *scene, uint32_t index) noexcept {
     expect(index != minipbrt::kInvalidIndex, "Invalid material index.");
     auto name = scene->materials[index]->name;
-    return std::format("Surface:{}:{}", index, name ? name : "unnamed");
+    return luisa::format("Surface:{}:{}", index, name ? name : "unnamed");
 }
 
 [[nodiscard]] static std::string texture_name(const minipbrt::Scene *scene, uint32_t index) noexcept {
     expect(index != minipbrt::kInvalidIndex, "Invalid texture index.");
     auto name = scene->textures[index]->name;
-    return std::format("Texture:{}:{}", index, name ? name : "unnamed");
+    return luisa::format("Texture:{}:{}", index, name ? name : "unnamed");
 }
 
 static void convert_shapes(
@@ -195,11 +195,11 @@ static void convert_shapes(
         }
         // surface
         if (auto m = base_shape->material; m != minipbrt::kInvalidIndex) {
-            prop["surface"] = std::format("@{}", material_name(scene, m));
+            prop["surface"] = luisa::format("@{}", material_name(scene, m));
         }
         // light
         if (auto l = base_shape->areaLight; l != minipbrt::kInvalidIndex) {
-            prop["light"] = std::format("@AreaLight:{}", l);
+            prop["light"] = luisa::format("@AreaLight:{}", l);
         }
         switch (auto shape_type = base_shape->type()) {
             case minipbrt::ShapeType::Sphere: {
@@ -218,9 +218,9 @@ static void convert_shapes(
             case minipbrt::ShapeType::TriangleMesh: {
                 auto mesh = static_cast<const minipbrt::TriangleMesh *>(base_shape);
                 println("Converting triangle mesh at index {} to Wavefront OBJ.", shape_index);
-                dump_mesh_to_wavefront_obj(mesh_dir / std::format("{:05}.obj", shape_index), mesh);
+                dump_mesh_to_wavefront_obj(mesh_dir / luisa::format("{:05}.obj", shape_index), mesh);
                 shape["impl"] = "Mesh";
-                prop["file"] = std::format("lr_exported_meshes/{:05}.obj", shape_index);
+                prop["file"] = luisa::format("lr_exported_meshes/{:05}.obj", shape_index);
                 if (mesh->alpha != minipbrt::kInvalidIndex) {// override the material's alpha
                     if (auto m = mesh->material; m == minipbrt::kInvalidIndex) {
                         prop["surface"] = {
@@ -229,7 +229,7 @@ static void convert_shapes(
                     } else {
                         prop["surface"] = converted[material_name(scene, m)];
                     }
-                    prop["surface"]["prop"]["alpha"] = std::format("@{}", texture_name(scene, mesh->alpha));
+                    prop["surface"]["prop"]["alpha"] = luisa::format("@{}", texture_name(scene, mesh->alpha));
                 }
                 break;
             }
@@ -237,9 +237,9 @@ static void convert_shapes(
                               shape_index, magic_enum::enum_name(shape_type));
         }
         if (shape.contains("impl")) {
-            converted[std::format("Shape:{}", shape_index)] = shape;
+            converted[luisa::format("Shape:{}", shape_index)] = shape;
             if (base_shape->object == minipbrt::kInvalidIndex) {// directly visible shape
-                converted["render"]["shapes"].emplace_back(std::format("@Shape:{}", shape_index));
+                converted["render"]["shapes"].emplace_back(luisa::format("@Shape:{}", shape_index));
             }
         }
     }
@@ -259,9 +259,9 @@ static void convert_shapes(
                    base_object->numShapes != 0u,
                "Invalid first shape index.");
         for (auto s = 0u; s < base_object->numShapes; s++) {
-            shapes.emplace_back(std::format("@Shape:{}", base_object->firstShape + s));
+            shapes.emplace_back(luisa::format("@Shape:{}", base_object->firstShape + s));
         }
-        converted[std::format("Object:{}", object_index)] = object;
+        converted[luisa::format("Object:{}", object_index)] = object;
     }
     // process instances
     for (auto instance_index = 0u; instance_index < scene->instances.size(); instance_index++) {
@@ -282,12 +282,12 @@ static void convert_shapes(
             prop["transform"] = std::move(t);
         }
         if (auto l = base_instance->areaLight; l != minipbrt::kInvalidIndex) {
-            prop["light"] = std::format("@AreaLight:{}", l);
+            prop["light"] = luisa::format("@AreaLight:{}", l);
         }
         expect(base_instance->object != minipbrt::kInvalidIndex, "Invalid object index.");
-        prop["shape"] = std::format("@Object:{}", base_instance->object);
-        converted[std::format("Instance:{}", instance_index)] = instance;
-        converted["render"]["shapes"].emplace_back(std::format("@Instance:{}", instance_index));
+        prop["shape"] = luisa::format("@Object:{}", base_instance->object);
+        converted[luisa::format("Instance:{}", instance_index)] = instance;
+        converted["render"]["shapes"].emplace_back(luisa::format("@Instance:{}", instance_index));
     }
 }
 
@@ -311,7 +311,7 @@ static void convert_area_lights(const minipbrt::Scene *scene,
                base_light->scale[1] * diffuse->L[1],
                base_light->scale[2] * diffuse->L[2]}}}};
         prop["two_sided"] = diffuse->twosided;
-        converted[std::format("AreaLight:{}", i)] = light;
+        converted[luisa::format("AreaLight:{}", i)] = light;
     }
 }
 
@@ -428,14 +428,14 @@ static void dump_converted_scene(const std::filesystem::path &base_dir,
     render["shapes"] = nlohmann::json::array({"@renderable"});
     nlohmann::json entry = {
         {"render", std::move(render)},
-        {"import", nlohmann::json::array({std::format("{}.exported.json", name)})},
+        {"import", nlohmann::json::array({luisa::format("{}.exported.json", name)})},
     };
     auto write_json = [&base_dir](std::string_view file_name, const nlohmann::json &json) {
         std::ofstream f{base_dir / file_name};
         f << json.dump(4);
     };
-    write_json(std::format("{}.exported.json", name), converted);
-    write_json(std::format("{}.json", name), entry);
+    write_json(luisa::format("{}.exported.json", name), converted);
+    write_json(luisa::format("{}.json", name), entry);
 }
 
 static void convert_lights(
@@ -462,39 +462,19 @@ static void convert_lights(
                 auto light_shape = nlohmann::json::object({{"type", "Shape"}, {"impl", "Sphere"}});
                 auto &prop = (light_shape["prop"] = nlohmann::json::object());
                 // transform
-                auto position_transform = nlohmann::json::object({
-                    {"type", "transform"}, {"impl", "SRT"},
-                    {"prop", nlohmann::json::object({
-                                 {"translate", nlohmann::json::array({
-                                                   point_light->from[0], point_light->from[1], point_light->from[2]
-                                               })}
-                             })}
-                });
+                auto position_transform = nlohmann::json::object({{"type", "transform"}, {"impl", "SRT"}, {"prop", nlohmann::json::object({{"translate", nlohmann::json::array({point_light->from[0], point_light->from[1], point_light->from[2]})}})}});
 
-
-                prop["transform"] = nlohmann::json::object({
-                    {"type", "transform"}, {"impl", "Stack"}
-                });
-                prop["transform"]["prop"] = nlohmann::json::object({
-                    {"transforms", nlohmann::json::array({
-                                       position_transform,
-                                       convert_transform(scene, base_light->lightToWorld)
-                                   })}
-                });
+                prop["transform"] = nlohmann::json::object({{"type", "transform"}, {"impl", "Stack"}});
+                prop["transform"]["prop"] = nlohmann::json::object({{"transforms", nlohmann::json::array({position_transform,
+                                                                                                          convert_transform(scene, base_light->lightToWorld)})}});
                 prop["light"] = light;
-//                converted[std::format("Light:{}", light_index)] = light;
+                //                converted[luisa::format("Light:{}", light_index)] = light;
                 break;
             }
             case minipbrt::LightType::Infinite: {
-                auto infinite_light = static_cast<minipbrt::InfiniteLight*>(base_light);
-                auto env = nlohmann::json::object({
-                    {"type", "Environment"}, {"impl", "Spherical"},
-                    {"prop", {{"emission", {
-                        {"type", "Texture"}, {"impl", "Image"},
-                        {"prop", { {"file", infinite_light->mapname} }}
-                    }}}}
-                });
-                auto name = std::format("EnvLight:{}", light_index);
+                auto infinite_light = static_cast<minipbrt::InfiniteLight *>(base_light);
+                auto env = nlohmann::json::object({{"type", "Environment"}, {"impl", "Spherical"}, {"prop", {{"emission", {{"type", "Texture"}, {"impl", "Image"}, {"prop", {{"file", infinite_light->mapname}}}}}}}});
+                auto name = luisa::format("EnvLight:{}", light_index);
                 converted[name] = env;
                 converted["render"]["environment"] = "@" + name;
                 break;
@@ -549,8 +529,8 @@ void convert(const char *scene_file_name) noexcept {
             }
         } else {
             auto e = loader.error();
-            auto message = e ? std::format("{} [{}:{}:{}]",
-                                           e->message(), e->filename(), e->line(), e->column()) :
+            auto message = e ? luisa::format("{} [{}:{}:{}]",
+                                             e->message(), e->filename(), e->line(), e->column()) :
                                "unknown";
             luisa::panic("Failed to load scene file {}: {}", scene_file.string(), message);
         }

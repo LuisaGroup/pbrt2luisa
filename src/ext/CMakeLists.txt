@@ -12,3 +12,4 @@ add_library(magic_enum INTERFACE)
 target_include_directories(magic_enum INTERFACE $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/magic_enum/include>)
 
 add_subdirectory(glm)
+add_subdirectory(fmt)
