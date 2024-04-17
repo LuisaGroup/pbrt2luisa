@@ -221,15 +221,28 @@ static void convert_shapes(
                 dump_mesh_to_wavefront_obj(mesh_dir / luisa::format("{:05}.obj", shape_index), mesh);
                 shape["impl"] = "Mesh";
                 prop["file"] = luisa::format("lr_exported_meshes/{:05}.obj", shape_index);
-                if (mesh->alpha != minipbrt::kInvalidIndex) {// override the material's alpha
+                if (auto a = mesh->alpha; a != minipbrt::kInvalidIndex) {// override the material's alpha
+                    auto alpha_texture_name = texture_name(scene, a);
                     if (auto m = mesh->material; m == minipbrt::kInvalidIndex) {
-                        prop["surface"] = {
-                            {"impl", "Matte"},
-                            {"prop", nlohmann::json::object()}};
+                        auto alpha_surface_name = luisa::format("Alpha:{}", alpha_texture_name);
+                        if (!converted.contains(alpha_surface_name)) {
+                            converted[alpha_surface_name] = {
+                                {"type", "Surface"},
+                                {"impl", "Matte"},
+                                {"prop",
+                                    {{"alpha", luisa::format("@{}", alpha_texture_name)}}}};
+                        }
+                        prop["surface"] = luisa::format("@{}", alpha_surface_name);
                     } else {
-                        prop["surface"] = converted[material_name(scene, m)];
+                        auto base_surface_name = material_name(scene, m);
+                        auto alpha_surface_name = luisa::format("{}:Alpha:{}", base_surface_name, alpha_texture_name);
+                        if (!converted.contains(alpha_surface_name)) {
+                            auto s = converted[base_surface_name];
+                            s["prop"]["alpha"] = luisa::format("@{}", alpha_texture_name);
+                            converted[alpha_surface_name] = std::move(s);
+                        }
+                        prop["surface"] = luisa::format("@{}", alpha_surface_name);
                     }
-                    prop["surface"]["prop"]["alpha"] = luisa::format("@{}", texture_name(scene, mesh->alpha));
                 }
                 break;
             }
