@@ -570,9 +570,7 @@ static void convert_materials(const std::filesystem::path &base_dir,
     }
 }
 
-[[nodiscard]] static nlohmann::json convert_film(const minipbrt::Scene *scene,
-                                                 nlohmann::json &converted) noexcept {
-    auto base_film = scene->film;
+[[nodiscard]] static nlohmann::json convert_film(const minipbrt::Film *base_film) noexcept {
     expect(base_film->type() == minipbrt::FilmType::Image,
            "Unsupported film type {}.", magic_enum::enum_name(base_film->type()));
     auto image = static_cast<const minipbrt::ImageFilm *>(base_film);
@@ -584,6 +582,12 @@ static void convert_materials(const std::filesystem::path &base_dir,
          {{"resolution", nlohmann::json::array({image->xresolution, image->yresolution})},
           {"exposure", std::log2(image->scale)},
           {"clamp", std::clamp(max_lum, 16.f, 65536.f)}}}};
+}
+
+[[nodiscard]] static nlohmann::json convert_filter(const minipbrt::Filter *base_filter) noexcept {
+    auto radius = std::max((base_filter->xwidth + base_filter->ywidth) / 2., 1.);
+    return {{"impl", "Gaussian"},
+            {"prop", {{"radius", radius}}}};
 }
 
 static void convert_camera(const minipbrt::Scene *scene,
@@ -619,7 +623,8 @@ static void convert_camera(const minipbrt::Scene *scene,
         }();
     }
     prop["transform"] = convert_camera_transform(scene, perspective->cameraToWorld);
-    prop["film"] = convert_film(scene, converted);
+    prop["film"] = convert_film(scene->film);
+    if (auto filter = scene->filter) { prop["filter"] = convert_filter(filter); }
     prop["file"] = [scene]() noexcept -> std::string {
         if (auto film = dynamic_cast<const minipbrt::ImageFilm *>(scene->film);
             film != nullptr && film->filename != nullptr) {
