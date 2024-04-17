@@ -15,6 +15,14 @@
 
 namespace luisa::render {
 
+[[nodiscard]] constexpr auto degrees(double x) noexcept {
+    return x / std::numbers::pi * 180.;
+}
+
+[[nodiscard]] constexpr auto radians(double x) noexcept {
+    return x * std::numbers::pi / 180.;
+}
+
 [[nodiscard]] static nlohmann::json convert_transform(
     const minipbrt::Scene *scene,
     const minipbrt::Transform &transform) noexcept {
@@ -372,7 +380,8 @@ static void convert_textures(const std::filesystem::path &base_dir,
                         panic("Failed to resolve image file path: {}.", e.what());
                     }
                 }();
-                auto copied_file = luisa::format("lr_exported_textures/{:05}_{}", texture_index, file.filename().string());
+                auto copied_file = luisa::format("lr_exported_textures/{:05}_{}",
+                                                 texture_index, file.filename().generic_string());
                 try {
                     std::filesystem::create_directories(base_dir / "lr_exported_textures");
                     std::filesystem::copy(file, base_dir / copied_file, std::filesystem::copy_options::update_existing);
@@ -431,9 +440,11 @@ static void float_tex_parsing(const minipbrt::Scene *scene,
                                                         nlohmann::json &converted) noexcept {
     auto base_texture_name = texture_name(scene, bump_map_index);
     auto base_texture = scene->textures[bump_map_index];
-    expect(base_texture->type() == minipbrt::TextureType::ImageMap,
-           "Unsupported bump map at index {} with type '{}'.",
-           bump_map_index, magic_enum::enum_name(base_texture->type()));
+    if (base_texture->type() != minipbrt::TextureType::ImageMap) {
+        eprintln("Ignored unsupported bump map at index {} with type '{}'.", bump_map_index,
+                 magic_enum::enum_name(base_texture->type()));
+        return {};
+    }
     return {};
 }
 
@@ -584,8 +595,12 @@ static void convert_camera(const minipbrt::Scene *scene,
     camera["type"] = "Camera";
     auto perspective = static_cast<const minipbrt::PerspectiveCamera *>(base_camera);
     auto &prop = (camera["prop"] = nlohmann::json::object());
+    auto w = 0, h = 0;
+    scene->film->get_resolution(w, h);
+    auto a = static_cast<double>(w) / static_cast<double>(h);
     if (perspective->lensradius > 0.f) {
-        auto focal_length = 12. / std::tan(glm::radians(perspective->fov / 2.));
+        auto uncropped = 12 / (a < 1. ? 1.5 * a : a / 1.5);
+        auto focal_length = uncropped / std::tan(radians(perspective->fov / 2.));
         auto focus_distance = perspective->focaldistance;
         auto lens_radius = perspective->lensradius * 1000.;
         camera["impl"] = "ThinLens";
@@ -594,11 +609,26 @@ static void convert_camera(const minipbrt::Scene *scene,
         prop["aperture"] = focal_length / (2. * lens_radius);
     } else {
         camera["impl"] = "Pinhole";
-        prop["fov"] = perspective->fov;
+        prop["fov"] = [f = static_cast<double>(perspective->fov), a] {
+            if (a < 1.) {// convert from horizontal to vertical
+                auto half_w = std::tan(radians(f) / 2.);
+                auto half_h = half_w / a;
+                return 2. * degrees(std::atan(half_h));
+            }
+            return f;
+        }();
     }
     prop["transform"] = convert_camera_transform(scene, perspective->cameraToWorld);
     prop["film"] = convert_film(scene, converted);
-    prop["file"] = "render.exr";
+    prop["file"] = [scene]() noexcept -> std::string {
+        if (auto film = dynamic_cast<const minipbrt::ImageFilm *>(scene->film);
+            film != nullptr && film->filename != nullptr) {
+            std::filesystem::path name{film->filename};
+            name.replace_extension(".exr");
+            return name.generic_string();
+        }
+        return "render.exr";
+    }();
     prop["spp"] = 1024;
     converted["render"]["cameras"] = nlohmann::json::array({camera});
 }
@@ -691,7 +721,8 @@ static void convert_lights(const std::filesystem::path &base_dir,
                             panic("Failed to resolve image file path: {}.", e.what());
                         }
                     }();
-                    auto copied_file = luisa::format("lr_exported_textures/env_{:05}_{}", light_index, file.filename().string());
+                    auto copied_file = luisa::format("lr_exported_textures/env_{:05}_{}",
+                                                     light_index, file.filename().generic_string());
                     try {
                         std::filesystem::create_directories(base_dir / "lr_exported_textures");
                         std::filesystem::copy(file, base_dir / copied_file, std::filesystem::copy_options::update_existing);
@@ -736,7 +767,7 @@ static void convert_scene(const std::filesystem::path &source_path,
         convert_shapes(base_dir, scene, converted);
         convert_lights(base_dir, scene, converted);
         convert_camera(scene, converted);
-        auto name = source_path.stem().string();
+        auto name = source_path.stem().generic_string();
         dump_converted_scene(base_dir, name, std::move(converted));
     } catch (const std::exception &e) {
         luisa::panic("{}", e.what());
@@ -747,7 +778,7 @@ void convert(const char *scene_file_name) noexcept {
     try {
         auto scene_file = std::filesystem::canonical(scene_file_name);
         minipbrt::Loader loader;
-        if (loader.load(scene_file.string().c_str())) {
+        if (loader.load(scene_file.generic_string().c_str())) {
             minipbrt::Bits<minipbrt::ShapeType> shape_types;
             shape_types.set(minipbrt::ShapeType::Nurbs);
             shape_types.set(minipbrt::ShapeType::LoopSubdiv);
@@ -763,7 +794,7 @@ void convert(const char *scene_file_name) noexcept {
             auto message = e ? luisa::format("{} [{}:{}:{}]",
                                              e->message(), e->filename(), e->line(), e->column()) :
                                "unknown";
-            luisa::panic("Failed to load scene file {}: {}", scene_file.string(), message);
+            luisa::panic("Failed to load scene file {}: {}", scene_file.generic_string(), message);
         }
     } catch (const std::exception &e) {
         luisa::panic("{}", e.what());
