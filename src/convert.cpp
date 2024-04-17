@@ -726,6 +726,36 @@ static void convert_lights(const std::filesystem::path &base_dir,
                 //                converted[luisa::format("Light:{}", light_index)] = light;
                 break;
             }
+            case minipbrt::LightType::Distant: {
+                auto distant_light = static_cast<minipbrt::DistantLight *>(base_light);
+                auto env = nlohmann::json::object(
+                    {{"type", "Environment"},
+                     {"impl", "Directional"}});
+                auto &prop = (env["prop"] = nlohmann::json::object());
+                auto &e = (prop["emission"] = nlohmann::json::object({
+                               {"type", "Texture"}, {"impl", "Constant"},
+                               {"prop", { {"v", {distant_light->L[0], distant_light->L[1], distant_light->L[2]}} }}
+                           }));
+                prop["direction"] = nlohmann::json::array({
+                    distant_light->to[0] - distant_light->from[0],
+                    distant_light->to[1] - distant_light->from[1],
+                    distant_light->to[2] - distant_light->from[2]
+                });
+                if (auto scale = base_light->scale;
+                    scale[0] == scale[1] && scale[1] == scale[2]) {
+                    prop["scale"] = {scale[0]};
+                } else {
+                    auto base_emission = std::move(e);
+                    prop["emission"] = {
+                        {"impl", "Scale"},
+                        {"prop", {{"base", std::move(base_emission)}, {"scale", {scale[0], scale[1], scale[2]}}}}};
+                }
+                auto name = luisa::format("Env:{}:Directional", light_index);
+                prop["transform"] = convert_envmap_transform(base_light->lightToWorld);
+                converted[name] = env;
+                env_array.emplace_back("@" + name);
+                break;
+            }
             case minipbrt::LightType::Infinite: {
                 auto infinite_light = static_cast<minipbrt::InfiniteLight *>(base_light);
                 auto env = nlohmann::json::object(
@@ -769,7 +799,7 @@ static void convert_lights(const std::filesystem::path &base_dir,
                         {"impl", "Scale"},
                         {"prop", {{"base", std::move(base_emission)}, {"scale", {scale[0], scale[1], scale[2]}}}}};
                 }
-                auto name = luisa::format("Env:{}:Infinite", light_index);
+                auto name = luisa::format("Env:{}:Spherical", light_index);
                 prop["transform"] = convert_envmap_transform(base_light->lightToWorld);
                 converted[name] = env;
                 env_array.emplace_back("@" + name);
