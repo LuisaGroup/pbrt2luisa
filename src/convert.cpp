@@ -661,6 +661,7 @@ static void dump_converted_scene(const std::filesystem::path &base_dir,
 static void convert_lights(const std::filesystem::path &base_dir,
                            const minipbrt::Scene *scene,
                            nlohmann::json &converted) {
+    std::vector<std::string> env_array;
     for (auto light_index = 0u; light_index < scene->lights.size(); light_index++) {
         auto base_light = scene->lights[light_index];
         auto light = nlohmann::json::object({{"type", "Light"}, {"impl", "Diffuse"}, {"prop", nlohmann::json::object()}});
@@ -736,15 +737,20 @@ static void convert_lights(const std::filesystem::path &base_dir,
                     e["impl"] = "Constant";
                     e["prop"] = {{"v", {infinite_light->L[0], infinite_light->L[1], infinite_light->L[2]}}};
                 }
-                auto name = luisa::format("EnvLight:{}", light_index);
+                auto name = luisa::format("Env:{}:Infinite", light_index);
                 converted[name] = env;
-                // TODO: use combine if existing
-                converted["render"]["environment"] = "@" + name;
+                env_array.emplace_back("@" + name);
                 break;
             }
             default: eprintln("Ignored unsupported light at index {} with type '{}'.",
                               light_index, magic_enum::enum_name(light_type));
         }
+    }
+    converted["render"]["environment"] = nlohmann::json::object({
+        {"type", "Environment"}, {"impl", "Grouped"}, {"prop", { {"environments", nlohmann::json::array()} }}
+    });
+    for(auto &item: env_array) {
+        converted["render"]["environment"]["prop"]["environments"].emplace_back(item);
     }
 }
 
