@@ -563,12 +563,13 @@ static void convert_camera(const minipbrt::Scene *scene,
     auto perspective = static_cast<const minipbrt::PerspectiveCamera *>(base_camera);
     auto &prop = (camera["prop"] = nlohmann::json::object());
     if (perspective->lensradius > 0.f) {
-        // FOV = 2 arctan h/2f => fov / 2 = arctan h / 2f => tan(fov / 2) = h / 2f =>
-        auto focal_length = (24. / 2.) / (std::tan(glm::radians(perspective->fov / 2.)));
+        auto focal_length = 12. / std::tan(glm::radians(perspective->fov / 2.));
         auto focus_distance = perspective->focaldistance;
+        auto lens_radius = perspective->lensradius * 1000.;
         camera["impl"] = "ThinLens";
         prop["focal_length"] = focal_length;
         prop["focus_distance"] = focus_distance;
+        prop["aperture"] = focal_length / (2. * lens_radius);
     } else {
         camera["impl"] = "Pinhole";
         prop["fov"] = perspective->fov;
