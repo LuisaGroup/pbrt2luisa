@@ -561,7 +561,7 @@ static void convert_materials(const std::filesystem::path &base_dir,
                 concat_tex_parsing(scene, prop, "roughness", roughness);
                 // TODO: minipbrt does not support eta/k parsing for metal material, Al for now
 //                metal_eta_k_parsing(scene, prop, "eta", metal_material->eta, metal_material->k);
-                prop["eta"] = "Al";
+                prop["eta"] = "Ti";
                 prop["remap_roughness"] = metal_material->remaproughness;
                 break;
             }
