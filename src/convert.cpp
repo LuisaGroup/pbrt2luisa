@@ -553,18 +553,15 @@ static void convert_materials(const std::filesystem::path &base_dir,
                 break;
             }
             case minipbrt::MaterialType::Metal: {
-                // TODO
-                eprintln("Ignored unsupported material at index {} with type '{}'.",
-                         i, magic_enum::enum_name(material_type));
-                break;
-
                 auto metal_material = static_cast<minipbrt::MetalMaterial *>(base_material);
                 material["impl"] = "Metal";
                 std::vector<const minipbrt::FloatTex *> roughness{
                     &metal_material->uroughness,
                     &metal_material->vroughness};
                 concat_tex_parsing(scene, prop, "roughness", roughness);
-                metal_eta_k_parsing(scene, prop, "eta", metal_material->eta, metal_material->k);
+                // TODO: minipbrt does not support eta/k parsing for metal material, Al for now
+//                metal_eta_k_parsing(scene, prop, "eta", metal_material->eta, metal_material->k);
+                prop["eta"] = "Al";
                 prop["remap_roughness"] = metal_material->remaproughness;
                 break;
             }
