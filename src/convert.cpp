@@ -751,11 +751,13 @@ static void convert_lights(const std::filesystem::path &base_dir,
             case minipbrt::LightType::Point:
             case minipbrt::LightType::Spot: {
                 // light
+                // shape radius = 0.01m
+                auto surface_area = 4 * std::numbers::pi * 0.01 * 0.01;
                 auto point_light = static_cast<minipbrt::PointLight *>(base_light);
                 emission["prop"] = nlohmann::json::object({{"v", nlohmann::json::array({
-                                                                     base_light->scale[0] * point_light->I[0],
-                                                                     base_light->scale[1] * point_light->I[1],
-                                                                     base_light->scale[2] * point_light->I[2],
+                                                                     base_light->scale[0] * point_light->I[0] / surface_area,
+                                                                     base_light->scale[1] * point_light->I[1] / surface_area,
+                                                                     base_light->scale[2] * point_light->I[2] / surface_area,
                                                                  })}});
 
                 // shape
@@ -772,7 +774,9 @@ static void convert_lights(const std::filesystem::path &base_dir,
                       {{"translate",
                         nlohmann::json::array({point_light->from[0],
                                                point_light->from[1],
-                                               point_light->from[2]})}}}});
+                                               point_light->from[2]})},
+                       {"scale", 0.01}
+                      }}});
                 if (auto t = convert_transform(base_light->lightToWorld); !t.is_null()) {
                     prop["transform"] = nlohmann::json::object({{"type", "transform"}, {"impl", "Stack"}});
                     prop["transform"]["prop"] = nlohmann::json::object(
@@ -780,10 +784,11 @@ static void convert_lights(const std::filesystem::path &base_dir,
                           nlohmann::json::array({position_transform, convert_transform(base_light->lightToWorld)})}});
                 } else {
                     prop["transform"] = std::move(position_transform);
-                }prop["light"] = light;
+                }
+                prop["light"] = light;
                 //                converted[luisa::format("Light:{}", light_index)] = light;
                 converted[luisa::format("PointLight:{}", light_index)] = light_shape;
-                converted["renderable"]["prop"]["shapes"].emplace_back(luisa::format("@PointLight:{}", light_index));
+                converted["render"]["shapes"].emplace_back(luisa::format("@PointLight:{}", light_index));
                 break;
             }
             case minipbrt::LightType::Distant: {
