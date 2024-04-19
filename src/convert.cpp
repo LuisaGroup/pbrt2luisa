@@ -560,7 +560,7 @@ static void convert_materials(const std::filesystem::path &base_dir,
                     &metal_material->vroughness};
                 concat_tex_parsing(scene, prop, "roughness", roughness);
                 // TODO: minipbrt does not support eta/k parsing for metal material, Al for now
-//                metal_eta_k_parsing(scene, prop, "eta", metal_material->eta, metal_material->k);
+                //                metal_eta_k_parsing(scene, prop, "eta", metal_material->eta, metal_material->k);
                 prop["eta"] = "Ti";
                 prop["remap_roughness"] = metal_material->remaproughness;
                 break;
@@ -744,11 +744,12 @@ static void convert_lights(const std::filesystem::path &base_dir,
             continue;
         }
         auto light = nlohmann::json::object({{"type", "Light"}, {"impl", "Diffuse"}, {"prop", nlohmann::json::object()}});
-        auto &emission = light["emission"];
+        auto &emission = light["prop"]["emission"];
         emission["type"] = "Texture";
         emission["impl"] = "Constant";
         switch (auto light_type = base_light->type()) {
-            case minipbrt::LightType::Point: {
+            case minipbrt::LightType::Point:
+            case minipbrt::LightType::Spot: {
                 // light
                 auto point_light = static_cast<minipbrt::PointLight *>(base_light);
                 emission["prop"] = nlohmann::json::object({{"v", nlohmann::json::array({
@@ -772,13 +773,17 @@ static void convert_lights(const std::filesystem::path &base_dir,
                         nlohmann::json::array({point_light->from[0],
                                                point_light->from[1],
                                                point_light->from[2]})}}}});
-
-                prop["transform"] = nlohmann::json::object({{"type", "transform"}, {"impl", "Stack"}});
-                prop["transform"]["prop"] = nlohmann::json::object(
-                    {{"transforms",
-                      nlohmann::json::array({position_transform, convert_transform(base_light->lightToWorld)})}});
-                prop["light"] = light;
+                if (auto t = convert_transform(base_light->lightToWorld); !t.is_null()) {
+                    prop["transform"] = nlohmann::json::object({{"type", "transform"}, {"impl", "Stack"}});
+                    prop["transform"]["prop"] = nlohmann::json::object(
+                        {{"transforms",
+                          nlohmann::json::array({position_transform, convert_transform(base_light->lightToWorld)})}});
+                } else {
+                    prop["transform"] = std::move(position_transform);
+                }prop["light"] = light;
                 //                converted[luisa::format("Light:{}", light_index)] = light;
+                converted[luisa::format("PointLight:{}", light_index)] = light_shape;
+                converted["renderable"]["prop"]["shapes"].emplace_back(luisa::format("@PointLight:{}", light_index));
                 break;
             }
             case minipbrt::LightType::Distant: {
