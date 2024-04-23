@@ -731,6 +731,14 @@ static void dump_converted_scene(const std::filesystem::path &base_dir,
     };
     write_json(luisa::format("{}.exported.json", name), converted);
     write_json(luisa::format("{}.json", name), entry);
+    // also make a interactive display version of the scene file
+    for (auto &camera : entry["render"]["cameras"]) {
+        auto film = std::move(camera["prop"]["film"]);
+        camera["prop"]["film"] = {
+            {"impl", "Display"},
+            {"prop", {{"base", std::move(film)}, {"tonemapping", "uncharted2"}}}};
+    }
+    write_json(luisa::format("{}.display.json", name), entry);
 }
 
 static void convert_lights(const std::filesystem::path &base_dir,
@@ -775,8 +783,7 @@ static void convert_lights(const std::filesystem::path &base_dir,
                         nlohmann::json::array({point_light->from[0],
                                                point_light->from[1],
                                                point_light->from[2]})},
-                       {"scale", 0.01}
-                      }}});
+                       {"scale", 0.01}}}});
                 if (auto t = convert_transform(base_light->lightToWorld); !t.is_null()) {
                     prop["transform"] = nlohmann::json::object({{"type", "transform"}, {"impl", "Stack"}});
                     prop["transform"]["prop"] = nlohmann::json::object(
