@@ -248,6 +248,7 @@ static void metal_eta_k_parsing(const minipbrt::Scene *scene,
 static void convert_shapes(
     const std::filesystem::path &base_dir,
     const minipbrt::Scene *scene,
+    std::string_view name,
     nlohmann::json &converted) {
     auto mesh_dir = base_dir / "lr_exported_meshes";
     std::filesystem::create_directories(mesh_dir);
@@ -293,9 +294,9 @@ static void convert_shapes(
             case minipbrt::ShapeType::TriangleMesh: {
                 auto mesh = static_cast<const minipbrt::TriangleMesh *>(base_shape);
                 println("Converting triangle mesh at index {} to Wavefront OBJ.", shape_index);
-                dump_mesh_to_wavefront_obj(mesh_dir / luisa::format("{:05}.obj", shape_index), mesh);
+                dump_mesh_to_wavefront_obj(mesh_dir / luisa::format("{}.{:05}.obj", name, shape_index), mesh);
                 shape["impl"] = "Mesh";
-                prop["file"] = luisa::format("lr_exported_meshes/{:05}.obj", shape_index);
+                prop["file"] = luisa::format("lr_exported_meshes/{}.{:05}.obj", name, shape_index);
                 if (auto a = mesh->alpha; a != minipbrt::kInvalidIndex) {// override the material's alpha
                     auto alpha_texture_name = texture_name(scene, a);
                     if (auto m = mesh->material; m == minipbrt::kInvalidIndex) {
@@ -949,10 +950,10 @@ static void convert_scene(const std::filesystem::path &source_path,
         convert_textures(base_dir, scene, converted);
         convert_materials(base_dir, scene, converted);
         convert_area_lights(scene, converted);
-        convert_shapes(base_dir, scene, converted);
+        auto name = source_path.stem().generic_string();
+        convert_shapes(base_dir, scene, name, converted);
         convert_lights(base_dir, scene, converted);
         convert_camera(scene, converted);
-        auto name = source_path.stem().generic_string();
         dump_converted_scene(base_dir, name, std::move(converted));
     } catch (const std::exception &e) {
         luisa::panic("{}", e.what());
