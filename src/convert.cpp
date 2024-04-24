@@ -493,6 +493,11 @@ static void convert_textures(const std::filesystem::path &base_dir,
     return {};
 }
 
+[[nodiscard]] static float roughness_to_alpha(float roughness) noexcept {
+    auto x = std::log(std::max(1e-3f, roughness));
+    return 1.62142f + 0.819955f * x + 0.1734f * x * x + 0.0171201f * x * x * x + 0.000640711f * x * x * x * x;
+}
+
 static void convert_materials(const std::filesystem::path &base_dir,
                               const minipbrt::Scene *scene,
                               nlohmann::json &converted) noexcept {
@@ -555,6 +560,10 @@ static void convert_materials(const std::filesystem::path &base_dir,
             case minipbrt::MaterialType::Metal: {
                 auto metal_material = static_cast<minipbrt::MetalMaterial *>(base_material);
                 material["impl"] = "Metal";
+                if (metal_material->remaproughness) {
+                    metal_material->uroughness.value = roughness_to_alpha(metal_material->uroughness.value);
+                    metal_material->vroughness.value = roughness_to_alpha(metal_material->vroughness.value);
+                }
                 std::vector<const minipbrt::FloatTex *> roughness{
                     &metal_material->uroughness,
                     &metal_material->vroughness};
@@ -562,7 +571,7 @@ static void convert_materials(const std::filesystem::path &base_dir,
                 // TODO: minipbrt does not support eta/k parsing for metal material, Al for now
                 //                metal_eta_k_parsing(scene, prop, "eta", metal_material->eta, metal_material->k);
                 prop["eta"] = "Ti";
-                prop["remap_roughness"] = metal_material->remaproughness;
+                prop["remap_roughness"] = false;
                 break;
             }
             case minipbrt::MaterialType::Mirror: {
@@ -592,21 +601,28 @@ static void convert_materials(const std::filesystem::path &base_dir,
                 auto substrate_material = static_cast<minipbrt::SubstrateMaterial *>(base_material);
                 material["impl"] = "Plastic";
                 color_tex_parsing(scene, prop, "Kd", substrate_material->Kd);
+                if (substrate_material->remaproughness) {
+                    substrate_material->uroughness.value = roughness_to_alpha(substrate_material->uroughness.value);
+                    substrate_material->vroughness.value = roughness_to_alpha(substrate_material->vroughness.value);
+                }
                 std::vector<const minipbrt::FloatTex *> roughness{
                     &substrate_material->uroughness,
                     &substrate_material->vroughness};
                 concat_tex_parsing(scene, prop, "roughness", roughness);
-                prop["remap_roughness"] = substrate_material->remaproughness;
+                prop["remap_roughness"] = false;
                 break;
             }
             case minipbrt::MaterialType::Translucent: {
                 auto translucent_material = static_cast<minipbrt::TranslucentMaterial *>(base_material);
                 material["impl"] = "Disney";
                 color_tex_parsing(scene, prop, "Kd", translucent_material->Kd);
-                color_tex_parsing(scene, prop, "specular_trans", translucent_material->Ks);
+                color_tex_parsing(scene, prop, "specular_trans", translucent_material->transmit);
+                if (translucent_material->remaproughness) {
+                    translucent_material->roughness.value = roughness_to_alpha(translucent_material->roughness.value);
+                }
                 float_tex_parsing(scene, prop, "roughness", translucent_material->roughness);
                 prop["thin"] = true;
-                prop["remap_roughness"] = translucent_material->remaproughness;
+                prop["remap_roughness"] = false;
                 break;
             }
             case minipbrt::MaterialType::Uber: {
@@ -615,13 +631,17 @@ static void convert_materials(const std::filesystem::path &base_dir,
                 color_tex_parsing(scene, prop, "Kd", uber_material->Kd);
                 float_tex_parsing(scene, prop, "eta", uber_material->eta);
                 //                color_tex_parsing(scene, prop, "metallic", uber_material->Ks);
+                if (uber_material->remaproughness) {
+                    uber_material->uroughness.value = roughness_to_alpha(uber_material->uroughness.value);
+                    uber_material->vroughness.value = roughness_to_alpha(uber_material->vroughness.value);
+                }
                 std::vector<const minipbrt::FloatTex *> roughness{
                     &uber_material->uroughness,
                     &uber_material->vroughness};
                 concat_tex_parsing(scene, prop, "roughness", roughness);
                 color_tex_parsing(scene, prop, "alpha", uber_material->opacity);
                 color_tex_parsing(scene, prop, "specular_trans", uber_material->Kt);
-                prop["remap_roughness"] = uber_material->remaproughness;
+                prop["remap_roughness"] = false;
                 break;
             }
                 //            case minipbrt::MaterialType::Subsurface:
