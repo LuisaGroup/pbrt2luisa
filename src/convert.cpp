@@ -421,9 +421,16 @@ static void convert_textures(const std::filesystem::path &base_dir,
         prop["v"] = {1.f, 1.f, 1.f, 1.f};
         switch (base_texture->type()) {
             case minipbrt::TextureType::Scale: {
-                auto s = static_cast<const minipbrt::ScaleTexture *>(base_texture);
+                auto s = static_cast<minipbrt::ScaleTexture *>(base_texture);
                 texture["impl"] = "Multiply";
                 color_tex_parsing(scene, prop, "a", s->tex1);
+                if (s->tex2.value[0] == 0.f &&
+                    s->tex2.value[1] == 0.f &&
+                    s->tex2.value[2] == 0.f) {
+                    s->tex2.value[0] = 1.f;
+                    s->tex2.value[1] = 1.f;
+                    s->tex2.value[2] = 1.f;
+                }
                 color_tex_parsing(scene, prop, "b", s->tex2);
                 break;
             }
@@ -502,6 +509,7 @@ static void convert_materials(const std::filesystem::path &base_dir,
         auto base_material = scene->materials[i];
         auto material = nlohmann::json::object();
         material["type"] = "Surface";
+        material["impl"] = "Matte";
         auto &prop = (material["prop"] = nlohmann::json::object());
         prop["source"] = magic_enum::enum_name(base_material->type());
         if (auto b = base_material->bumpmap; b != minipbrt::kInvalidIndex) {
