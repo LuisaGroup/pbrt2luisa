@@ -223,16 +223,31 @@ static void concat_tex_parsing(const minipbrt::Scene *scene,
                                nlohmann::json &prop,
                                const std::string &name,
                                const std::vector<const minipbrt::FloatTex *> &textures) {
-    auto channels = nlohmann::json::array();
-    for (auto tex : textures) {
-        auto temp = nlohmann::json::object({});
-        float_tex_parsing(scene, temp, "value", *tex);
-        channels.emplace_back(std::move(temp["value"]));
+    auto is_constant = std::all_of(textures.cbegin(), textures.cend(), [](const minipbrt::FloatTex *t) noexcept {
+        return t->texture == minipbrt::kInvalidIndex;
+    });
+    if (is_constant) {
+        std::vector<double> values;
+        values.reserve(textures.size());
+        for (auto t : textures) {
+            values.emplace_back(t->value);
+        }
+        prop[name] = nlohmann::json::object(
+            {{"type", "Texture"},
+             {"impl", "Constant"},
+             {"prop", {{"v", std::move(values)}}}});
+    } else {
+        auto channels = nlohmann::json::array();
+        for (auto tex : textures) {
+            auto temp = nlohmann::json::object({});
+            float_tex_parsing(scene, temp, "value", *tex);
+            channels.emplace_back(std::move(temp["value"]));
+        }
+        prop[name] = nlohmann::json::object(
+            {{"type", "Texture"},
+             {"impl", "Concat"},
+             {"prop", {{"channels", channels}}}});
     }
-    prop[name] = nlohmann::json::object(
-        {{"type", "Texture"},
-         {"impl", "Concat"},
-         {"prop", {{"channels", channels}}}});
 }
 
 static void metal_eta_k_parsing(const minipbrt::Scene *scene,
@@ -502,6 +517,18 @@ static void convert_textures(const std::filesystem::path &base_dir,
     return 1.62142f + 0.819955f * x + 0.1734f * x * x + 0.0171201f * x * x * x + 0.000640711f * x * x * x * x;
 }
 
+[[nodiscard]] static bool is_null_color_texture(const minipbrt::ColorTex *t) noexcept {
+    return t->texture == minipbrt::kInvalidIndex &&
+           t->value[0] == 0.f &&
+           t->value[1] == 0.f &&
+           t->value[2] == 0.f;
+}
+
+[[nodiscard]] static bool is_null_float_texture(const minipbrt::FloatTex *t) noexcept {
+    return t->texture == minipbrt::kInvalidIndex &&
+           t->value == 0.f;
+}
+
 static void convert_materials(const std::filesystem::path &base_dir,
                               const minipbrt::Scene *scene,
                               nlohmann::json &converted) noexcept {
@@ -530,7 +557,9 @@ static void convert_materials(const std::filesystem::path &base_dir,
                 // TODO scatterdistance
                 float_tex_parsing(scene, prop, "sheen", disney_material->sheen);
                 float_tex_parsing(scene, prop, "sheen_tint", disney_material->sheentint);
-                float_tex_parsing(scene, prop, "specular_trans", disney_material->spectrans);
+                if (!is_null_float_texture(&disney_material->spectrans)) {
+                    float_tex_parsing(scene, prop, "specular_trans", disney_material->spectrans);
+                }
                 prop["thin"] = disney_material->thin;
                 color_tex_parsing(scene, prop, "diffuse_trans", disney_material->difftrans);
                 color_tex_parsing(scene, prop, "flatness", disney_material->flatness);
@@ -615,12 +644,14 @@ static void convert_materials(const std::filesystem::path &base_dir,
                 auto translucent_material = static_cast<minipbrt::TranslucentMaterial *>(base_material);
                 material["impl"] = "Disney";
                 color_tex_parsing(scene, prop, "Kd", translucent_material->Kd);
-                color_tex_parsing(scene, prop, "specular_trans", translucent_material->transmit);
+                // if (!is_null_color_texture(&translucent_material->transmit)) {
+                //     color_tex_parsing(scene, prop, "specular_trans", translucent_material->transmit);
+                // }
                 if (translucent_material->remaproughness) {
                     translucent_material->roughness.value = roughness_to_alpha(translucent_material->roughness.value);
                 }
                 float_tex_parsing(scene, prop, "roughness", translucent_material->roughness);
-                prop["thin"] = true;
+                // prop["thin"] = true;
                 prop["remap_roughness"] = false;
                 break;
             }
@@ -639,7 +670,9 @@ static void convert_materials(const std::filesystem::path &base_dir,
                     &uber_material->vroughness};
                 concat_tex_parsing(scene, prop, "roughness", roughness);
                 color_tex_parsing(scene, prop, "alpha", uber_material->opacity);
-                color_tex_parsing(scene, prop, "specular_trans", uber_material->Kt);
+                if (!is_null_color_texture(&uber_material->Kt)) {
+                    color_tex_parsing(scene, prop, "specular_trans", uber_material->Kt);
+                }
                 prop["remap_roughness"] = false;
                 break;
             }
