@@ -874,14 +874,10 @@ static void convert_lights(const std::filesystem::path &base_dir,
                             m[1][0], m[1][1], m[1][2], m[1][3],
                             m[2][0], m[2][1], m[2][2], m[2][3],
                             m[3][0], m[3][1], m[3][2], m[3][3]);
-                    auto d = glm::vec3(m * glm::vec4(distant_light->to[0], distant_light->to[1], distant_light->to[2], 1.f)) -
-                             glm::vec3(m * glm::vec4(distant_light->from[0], distant_light->from[1], distant_light->from[2], 1.f));
-                    auto dd =//glm::mat3(glm::rotate(glm::mat4(1.f), -.5f * std::numbers::pi_v<float>, glm::vec3(0, 0, 1))) *
-                        //glm::mat3(glm::scale(glm::mat4(1.f), glm::vec3(1, -1, 1))) *
-                        //glm::mat3(glm::rotate(glm::mat4(1.f), .5f * std::numbers::pi_v<float>, glm::vec3(1, 0, 0))) *
-                        glm::normalize(d);
-                    prop["direction"] = nlohmann::json::array({-dd.x, -dd.y, dd.z});
-                    luisa::println("Directional light direction: ({}, {}, {}).", -dd.x, -dd.y, dd.z);
+                    auto d = glm::normalize(
+                        glm::vec3(m * glm::vec4(distant_light->from[0], distant_light->from[1], distant_light->from[2], 1.f)) -
+                        glm::vec3(m * glm::vec4(distant_light->to[0], distant_light->to[1], distant_light->to[2], 1.f)));
+                    prop["direction"] = nlohmann::json::array({d.x, d.y, d.z});
                     if (auto scale = base_light->scale;
                         scale[0] == scale[1] && scale[1] == scale[2]) {
                         prop["scale"] = scale[0];
