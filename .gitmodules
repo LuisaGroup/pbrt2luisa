@@ -1,6 +1,6 @@
 [submodule "src/ext/minipbrt"]
 	path = src/ext/minipbrt
-	url = https://github.com/vilya/minipbrt.git
+	url = https://github.com/LuisaGroup/minipbrt.git
 [submodule "src/ext/json"]
 	path = src/ext/json
 	url = https://github.com/nlohmann/json.git

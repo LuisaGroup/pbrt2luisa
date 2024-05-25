@@ -598,7 +598,22 @@ static void convert_materials(const std::filesystem::path &base_dir,
                 concat_tex_parsing(scene, prop, "roughness", roughness);
                 // TODO: minipbrt does not support eta/k parsing for metal material, Al for now
                 //                metal_eta_k_parsing(scene, prop, "eta", metal_material->eta, metal_material->k);
-                prop["eta"] = "Ti";
+                if (auto eta = metal_material->eta_spd, k = metal_material->k_spd;
+                    !eta.empty() && !k.empty() && eta.size() == k.size()) {
+                    println("Found SPD for metal material at index {}.", i);
+                    auto n = eta.size() / 2u;
+                    std::vector<double> spd(n * 3);
+                    for (auto w = 0; w < n; w++) {
+                        auto wl = eta[w * 2];
+                        expect(wl == k[w * 2], "Invalid SPD wavelength.");
+                        spd[w * 3 + 0] = wl;
+                        spd[w * 3 + 1] = eta[w * 2 + 1];
+                        spd[w * 3 + 2] = k[w * 2 + 1];
+                    }
+                    prop["eta"] = std::move(spd);
+                } else {
+                    prop["eta"] = "Au";
+                }
                 prop["remap_roughness"] = false;
                 break;
             }
@@ -755,7 +770,7 @@ static void convert_camera(const minipbrt::Scene *scene,
         }
         return "render.exr";
     }();
-    prop["spp"] = 64;
+    prop["spp"] = 1024;
     converted["render"]["cameras"] = nlohmann::json::array({camera});
 }
 
@@ -968,9 +983,9 @@ static void convert_scene(const std::filesystem::path &source_path,
              {{"integrator",
                {{"impl", "MegaPath"},
                 {"prop",
-                 {{"depth", 16},
-                  {"rr_depth", 5},
-                  {"sampler", {{"impl", "ZSobol"}}}}}}},
+                 {{"depth", 10},
+                  {"rr_depth", 2},
+                  {"sampler", {{"impl", "PMJ02BN"}}}}}}},
               {"shapes", nlohmann::json::array()}}}};
         convert_textures(base_dir, scene, converted);
         convert_materials(base_dir, scene, converted);
