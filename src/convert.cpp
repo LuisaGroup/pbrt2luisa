@@ -801,7 +801,7 @@ static void dump_converted_scene(const std::filesystem::path &base_dir,
         auto film = std::move(camera["prop"]["film"]);
         camera["prop"]["film"] = {
             {"impl", "Display"},
-            {"prop", {{"base", std::move(film)}, {"tonemapping", "uncharted2"}}}};
+            {"prop", {{"base", std::move(film)}, {"tonemapping", "AgX"}}}};
         camera["prop"]["spp"] = 65536;
     }
     write_json(luisa::format("{}.display.json", name), entry);
